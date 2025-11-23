@@ -1,0 +1,82 @@
+name = "homebench_white_agent"
+description = "LLM-based smart home assistant agent being evaluated on HomeBench."
+version = "1.0.0"
+
+defaultInputModes = ["text/plain"]
+defaultOutputModes = ["application/json"]
+
+[capabilities]
+streaming = false
+push_notifications = false
+interactive = true
+
+preferredTransport = "http"
+
+[[skills]]
+id = "smart_home_control"
+name = "Smart Home Device Control"
+description = """
+Controls smart home devices based on natural language instructions.
+Can operate lights, air conditioners, media players, and 12+ other device types.
+Uses MCP to access device APIs and must validate instruction feasibility.
+"""
+tags = ["smart-home", "device-control", "natural-language", "mcp-client"]
+examples = [
+    "Turn on the bedroom light",
+    "Set the living room air conditioner to 22 degrees",
+    "Increase the volume of the media player by 20%",
+    "Turn on all lights in the house",
+    "Set bedroom temperature to 25 and turn on the fan"
+]
+input_modes = ["text/plain"]
+output_modes = ["application/json"]
+
+[[skills]]
+id = "device_state_understanding"
+name = "Device State Understanding"
+description = """
+Understands current state of all smart home devices across multiple rooms.
+Can query device capabilities and determine valid operations.
+"""
+tags = ["smart-home", "state-tracking", "context-awareness"]
+examples = [
+    "What devices are in the bedroom?",
+    "Is the living room air conditioner on?",
+    "What is the current temperature setting?"
+]
+input_modes = ["text/plain"]
+output_modes = ["application/json"]
+
+[[skills]]
+id = "invalid_instruction_detection"
+name = "Invalid Instruction Detection"
+description = """
+Detects and rejects invalid instructions involving non-existent devices,
+unsupported operations, or out-of-range parameters. Critical capability
+for safety and user trust.
+"""
+tags = ["smart-home", "error-detection", "validation", "safety"]
+examples = [
+    "Turn on the kitchen oven (when no oven exists)",
+    "Set air conditioner to heating mode (when it only supports cooling)",
+    "Adjust bedroom dishwasher settings (dishwasher not in bedroom)"
+]
+input_modes = ["text/plain"]
+output_modes = ["application/json"]
+
+[[skills]]
+id = "multi_device_coordination"
+name = "Multi-Device Coordination"
+description = """
+Executes instructions involving multiple devices simultaneously.
+Can coordinate operations across different rooms and device types.
+"""
+tags = ["smart-home", "multi-device", "coordination", "complex-operations"]
+examples = [
+    "Turn off all lights and lock all doors",
+    "Set bedroom AC to 24 degrees and close all blinds",
+    "Prepare evening mode: dim lights, close curtains, play relaxing music",
+    "Morning routine: open blinds, turn on coffee maker, set temperature to 22"
+]
+input_modes = ["text/plain"]
+output_modes = ["application/json"]
