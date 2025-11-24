@@ -10,26 +10,12 @@ This server exposes the HomeBench evaluation tools via both:
 from typing import Dict, List, Any, Optional
 from fastmcp import FastMCP
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
 import uvicorn
-import asyncio
 
-# Initialize FastMCP server
 mcp_server = FastMCP("HomeBench Green Agent MCP", version="1.0.0")
 
-# Initialize FastAPI for HTTP wrapper
 http_app = FastAPI(title="HomeBench MCP HTTP Wrapper")
 
-
-# Request/Response models for HTTP API
-class ToolCallRequest(BaseModel):
-    name: str
-    arguments: Dict[str, Any]
-
-
-class ToolCallResponse(BaseModel):
-    result: Any
-    error: Optional[str] = None
 
 # Tool Registry
 TOOLS = {}
@@ -56,7 +42,6 @@ def run_homebench_evaluation(purple_agent_url: str, evaluation_config: Dict[str,
     print(f"Starting HomeBench evaluation for {purple_agent_url}")
     print(f"Config: {evaluation_config}")
     
-    # Mock implementation
     return {
         "status": "completed",
         "summary": {

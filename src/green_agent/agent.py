@@ -7,7 +7,6 @@ try:
     import tomllib
 except ImportError:
     import tomli as tomllib
-import dotenv
 import json
 import time
 
@@ -18,8 +17,8 @@ from a2a.server.events import EventQueue
 from a2a.server.tasks import InMemoryTaskStore
 from a2a.types import AgentCard, SendMessageSuccessResponse, Message
 from a2a.utils import new_agent_text_message, get_text_parts
-from src.utils import parse_tags, my_a2a
-from src.green_agent.mcp_client import MCPClient
+from src.utils import parse_tags
+from src.green_agent.mcp.mcp_client import MCPClient
 
 
 def get_env(env_name, user_strategy, user_model, task_split, user_provider=None, task_index=0):

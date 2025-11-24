@@ -5,8 +5,7 @@ This client connects to the MCP server and provides methods to call the tools.
 """
 
 import httpx
-import json
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any
 
 
 class MCPClient:
