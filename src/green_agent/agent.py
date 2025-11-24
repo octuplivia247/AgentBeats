@@ -3,7 +3,10 @@ Green Agent - Assessment Manager for BenchPress Smart Home Assessment
 """
 
 import uvicorn
-import tomllib
+try:
+    import tomllib
+except ImportError:
+    import tomli as tomllib
 import dotenv
 import json
 import time
@@ -16,6 +19,31 @@ from a2a.server.tasks import InMemoryTaskStore
 from a2a.types import AgentCard, SendMessageSuccessResponse, Message
 from a2a.utils import new_agent_text_message, get_text_parts
 from src.utils import parse_tags, my_a2a
+from src.green_agent.mcp_client import MCPClient
+
+
+def get_env(env_name, user_strategy, user_model, task_split, user_provider=None, task_index=0):
+    """Mock implementation of get_env for testing."""
+    class MockEnv:
+        def __init__(self):
+            self.tools_info = []
+            self.wiki = "Smart home environment"
+    
+    print(f"Creating mock environment: {env_name}, task {task_index}")
+    return MockEnv()
+
+
+async def ask_agent_to_solve(white_agent_url, env, task_index, max_num_steps=30):
+    """Mock implementation of ask_agent_to_solve for testing."""
+    print(f"Mock evaluation of agent at {white_agent_url}")
+    
+    class SolveResult:
+        def __init__(self, reward, info):
+            self.reward = reward
+            self.info = info
+    
+    # Simulate evaluation
+    return SolveResult(reward=1, info={"steps": 5})
 
 
 def load_agent_card_toml(agent_name):
@@ -128,6 +156,8 @@ def load_agent_card_toml(agent_name):
 
 
 class GreenAgentExecutor(AgentExecutor):
+    """Original green agent executor using mock tau-bench approach."""
+    
     def __init__(self):
         pass
 
@@ -187,15 +217,200 @@ class GreenAgentExecutor(AgentExecutor):
         raise NotImplementedError
 
 
+class GreenAgentMCPExecutor(AgentExecutor):
+    """Green agent executor using MCP tools for HomeBench evaluation."""
+    
+    def __init__(self, mcp_url: str = "http://localhost:9006"):
+        """
+        Initialize the MCP-based executor.
+        
+        Args:
+            mcp_url: URL of the MCP server
+        """
+        self.mcp_url = mcp_url
+        self.mcp_client = None
 
-def start_green_agent(agent_name="SmartHome_green_agent", host="localhost", port=9001):
+    async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
+        """Execute evaluation using MCP tools."""
+        # Initialize MCP client
+        self.mcp_client = MCPClient(self.mcp_url)
+        
+        try:
+            print("Green agent (MCP): Received a task, parsing...")
+            user_input = context.get_user_input()
+            tags = parse_tags(user_input)
+            
+            # Parse input - support both old format (white_agent_url) and new format (purple_agent_url)
+            purple_agent_url = tags.get("purple_agent_url") or tags.get("white_agent_url")
+            
+            # Parse configuration
+            if "evaluation_config" in tags:
+                # New format
+                config_str = tags["evaluation_config"]
+                evaluation_config = json.loads(config_str)
+            elif "env_config" in tags:
+                # Old format - convert to new format
+                env_config_str = tags["env_config"]
+                env_config = json.loads(env_config_str)
+                evaluation_config = {
+                    "environment": env_config.get("env", "smart_home"),
+                    "task_ids": env_config.get("task_ids", [1]),
+                    "max_steps_per_task": 30
+                }
+            else:
+                # Default configuration
+                evaluation_config = {
+                    "environment": "smart_home",
+                    "max_steps_per_task": 30
+                }
+            
+            print(f"Green agent (MCP): Evaluating agent at {purple_agent_url}")
+            print(f"Green agent (MCP): Configuration: {json.dumps(evaluation_config, indent=2)}")
+            
+            # Step 1: Initialize smart home environment
+            await event_queue.enqueue_event(
+                new_agent_text_message("Initializing smart home environment...")
+            )
+            
+            env_config = {
+                "rooms": ["living_room", "bedroom", "kitchen"],
+                "devices": {
+                    "living_room_light": {"type": "light", "state": "off"},
+                    "living_room_thermostat": {"type": "thermostat", "temperature": 70},
+                    "bedroom_light": {"type": "light", "state": "off"},
+                    "kitchen_light": {"type": "light", "state": "off"}
+                }
+            }
+            
+            init_result = await self.mcp_client.initialize_smart_home(env_config)
+            print(f"Environment initialized: {init_result}")
+            
+            # Step 2: Run evaluation for each task
+            task_ids = evaluation_config.get("task_ids", [1])
+            all_results = []
+            
+            await event_queue.enqueue_event(
+                new_agent_text_message(f"Running evaluation for {len(task_ids)} task(s)...")
+            )
+            
+            for task_id in task_ids:
+                # Create a sample task
+                task = {
+                    "task_id": f"task_{task_id}",
+                    "instruction": f"Turn on the living room light (Task {task_id})",
+                    "expected_actions": ["turn_on_light"]
+                }
+                
+                # Assign task
+                print(f"Assigning task {task_id}...")
+                assign_result = await self.mcp_client.assign_task(task)
+                
+                # Monitor actions
+                print(f"Monitoring agent actions for task {task_id}...")
+                monitoring_config = {
+                    "task_id": task["task_id"],
+                    "timeout": evaluation_config.get("max_steps_per_task", 30)
+                }
+                actions = await self.mcp_client.monitor_purple_agent_actions(monitoring_config)
+                
+                # Evaluate completion
+                print(f"Evaluating task completion for task {task_id}...")
+                eval_input = {
+                    "task": task,
+                    "actions": actions,
+                    "final_states": {"living_room_light": {"state": "on"}}
+                }
+                eval_result = await self.mcp_client.evaluate_task_completion(eval_input)
+                
+                all_results.append(eval_result)
+                
+                status = "✅" if eval_result.get("success") else "❌"
+                await event_queue.enqueue_event(
+                    new_agent_text_message(
+                        f"Task {task_id}: {status} (Score: {eval_result.get('score', 0.0)})"
+                    )
+                )
+            
+            # Step 3: Compute overall metrics
+            print("Computing accuracy metrics...")
+            predictions = [r.get("predicted_action", "none") for r in all_results]
+            expected = [r.get("expected_action", "none") for r in all_results]
+            
+            metrics = await self.mcp_client.compute_accuracy_metrics(predictions, expected)
+            
+            # Step 4: Send final results
+            success_count = sum(1 for r in all_results if r.get("success"))
+            total_count = len(all_results)
+            success_rate = success_count / total_count if total_count > 0 else 0
+            
+            final_message = f"""
+Evaluation Complete! 🎉
+
+Results:
+- Tasks Completed: {success_count}/{total_count}
+- Success Rate: {success_rate:.1%}
+
+Metrics:
+- Exact Match: {metrics.get('exact_match', 0):.2f}
+- Precision: {metrics.get('precision', 0):.2f}
+- Recall: {metrics.get('recall', 0):.2f}
+- F1 Score: {metrics.get('f1', 0):.2f}
+
+Agent URL: {purple_agent_url}
+"""
+            
+            print("Green agent (MCP): Evaluation complete.")
+            await event_queue.enqueue_event(new_agent_text_message(final_message))
+            
+        except Exception as e:
+            print(f"Green agent (MCP): Error during execution: {e}")
+            import traceback
+            traceback.print_exc()
+            await event_queue.enqueue_event(
+                new_agent_text_message(f"Error during evaluation: {str(e)}")
+            )
+        finally:
+            if self.mcp_client:
+                await self.mcp_client.close()
+
+    async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
+        """Cancel the execution."""
+        if self.mcp_client:
+            await self.mcp_client.close()
+        raise NotImplementedError("Cancellation not fully implemented")
+
+
+
+def start_green_agent(
+    agent_name="SmartHome_green_agent",
+    host="localhost",
+    port=9001,
+    mcp_url=None
+):
+    """
+    Start the green agent.
+    
+    Args:
+        agent_name: Name of the agent configuration file (without .toml extension)
+        host: Host to bind the server
+        port: Port to bind the server
+        mcp_url: Optional MCP server URL. If provided, uses MCP-based executor.
+    """
     print("Starting green agent...")
     agent_card_dict = load_agent_card_toml(agent_name)
     url = f"http://{host}:{port}"
     agent_card_dict["url"] = url  # complete all required card fields
 
+    # Choose executor based on whether MCP URL is provided
+    if mcp_url:
+        print(f"Using MCP executor with server at: {mcp_url}")
+        executor = GreenAgentMCPExecutor(mcp_url=mcp_url)
+    else:
+        print("Using standard executor (mock mode)")
+        executor = GreenAgentExecutor()
+
     request_handler = DefaultRequestHandler(
-        agent_executor=GreenAgentExecutor(),
+        agent_executor=executor,
         task_store=InMemoryTaskStore(),
     )
 
