@@ -1,4 +1,4 @@
-from typing import List, Dict, Tuple
+from typing import Dict, List, Tuple
 
 from src.green_agent.core.models import TaskResult
 
@@ -66,8 +66,7 @@ class MetricsCalculator:
 
     @staticmethod
     def compute_precision_recall_f1(
-            predictions: List[str],
-            expected: List[str]
+        predictions: List[str], expected: List[str]
     ) -> Tuple[float, float, float]:
         """
         Compute precision, recall, and F1 score.

@@ -1,8 +1,21 @@
-from typing import Optional, Dict, List
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
 
 from src.green_agent.core.evaluator import HomeBenchEvaluator
 from src.green_agent.core.models.task_result import TaskResult
 from src.green_agent.core.smart_home_env_manager import SmartHomeEnvironment
+
+
+@dataclass
+class ActionLog:
+    """Log entry for a device action."""
+
+    timestamp: str
+    device_name: str
+    action: str
+    parameters: Dict[str, Any]
+    success: bool
+    error: Optional[str] = None
 
 
 class GlobalState:
@@ -20,7 +33,9 @@ class GlobalState:
             self.environments[env_id] = SmartHomeEnvironment()
         return self.environments[env_id]
 
-    def get_or_create_evaluator(self, agent_url: str, eval_id: str = "default") -> HomeBenchEvaluator:
+    def get_or_create_evaluator(
+        self, agent_url: str, eval_id: str = "default"
+    ) -> HomeBenchEvaluator:
         """Get or create an evaluator."""
         if eval_id not in self.evaluators:
             self.evaluators[eval_id] = HomeBenchEvaluator(agent_url)

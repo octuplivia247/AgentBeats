@@ -29,11 +29,13 @@ precision/recall/F1 scoring, and detailed per-category error analysis.
 '''
 version = "1.0.0"
 
-defaultInputModes   = ["text", "application/json"]
-defaultOutputModes  = ["text", "application/json"]
+default_input_modes   = ["text/plain", "application/json"]
+default_output_modes  = ["text/plain", "application/json"]
 
 [capabilities]
-streaming = false
+supports_streaming = false
+supports_context = true
+supports_files = false
 
 # Main evaluation orchestration skills
 [[skills]]

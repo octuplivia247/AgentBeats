@@ -1,18 +1,17 @@
-import httpx
 import asyncio
 import uuid
 
-
+import httpx
 from a2a.client import A2ACardResolver, A2AClient
 from a2a.types import (
     AgentCard,
-    Part,
-    TextPart,
-    MessageSendParams,
     Message,
+    MessageSendParams,
+    Part,
     Role,
     SendMessageRequest,
     SendMessageResponse,
+    TextPart,
 )
 
 
@@ -35,18 +34,14 @@ async def wait_agent_ready(url, timeout=10):
             if card is not None:
                 return True
             else:
-                print(
-                    f"Agent card not available yet..., retrying {retry_cnt}/{timeout}"
-                )
+                print(f"Agent card not available yet..., retrying {retry_cnt}/{timeout}")
         except Exception:
             pass
         await asyncio.sleep(1)
     return False
 
 
-async def send_message(
-    url, message, task_id=None, context_id=None
-) -> SendMessageResponse:
+async def send_message(url, message, task_id=None, context_id=None) -> SendMessageResponse:
     card = await get_agent_card(url)
     httpx_client = httpx.AsyncClient(timeout=120.0)
     client = A2AClient(httpx_client=httpx_client, agent_card=card)

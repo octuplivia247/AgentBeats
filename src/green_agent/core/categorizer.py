@@ -1,4 +1,4 @@
-from typing import Dict, List, Any
+from typing import Any, Dict, List
 
 
 class TaskCategorizer:
@@ -27,4 +27,3 @@ class TaskCategorizer:
     def load_and_categorize_dataset(dataset_path: str) -> Dict[str, List[Dict[str, Any]]]:
         """Load dataset and group by category."""
         raise NotImplementedError()
-

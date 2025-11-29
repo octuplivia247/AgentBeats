@@ -1,4 +1,4 @@
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 
 class SmartHomeEnvironment:
@@ -68,10 +68,7 @@ class SmartHomeEnvironment:
         raise NotImplementedError()
 
     def execute_action(
-            self,
-            device_name: str,
-            action: str,
-            parameters: Optional[Dict[str, Any]] = None
+        self, device_name: str, action: str, parameters: Optional[Dict[str, Any]] = None
     ) -> Any:
         """
         Execute an action on a device and log the result.
@@ -160,4 +157,3 @@ class SmartHomeEnvironment:
         - Update self.device_states
         """
         raise NotImplementedError()
-

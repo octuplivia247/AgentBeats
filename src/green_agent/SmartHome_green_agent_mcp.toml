@@ -31,11 +31,13 @@ All capabilities are provided via the MCP server. You have access to tools for:
 '''
 version = "1.0.0"
 
-defaultInputModes   = ["text", "application/json"]
-defaultOutputModes  = ["text", "application/json"]
+default_input_modes   = ["text/plain", "application/json"]
+default_output_modes  = ["text/plain", "application/json"]
 
 [capabilities]
-streaming = true
+supports_streaming = true
+supports_context = true
+supports_files = false
 
 [[skills]]
 id          = "run_homebench_evaluation_mcp"

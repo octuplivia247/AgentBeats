@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import List, Any
+from typing import Any, List
 
 
 @dataclass
@@ -22,6 +22,7 @@ class TaskResult:
         category: HomeBench category (e.g., "normal_single", "mix_multi")
         execution_time: Time taken to complete the task in seconds
     """
+
     task_id: str
     instruction: str
     expected_operations: List[str]

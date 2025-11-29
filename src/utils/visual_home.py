@@ -1,11 +1,25 @@
-
-from devices import *
+import inspect
 import json
 import random
-import inspect
 
-AllCandiateRoom = ["master bedroom","guest bedroom","living room","ding room","study room","kitchen","bathroom","foyer","corridor","balcony","garage","store room"]
+from devices import *
+
+AllCandiateRoom = [
+    "master bedroom",
+    "guest bedroom",
+    "living room",
+    "ding room",
+    "study room",
+    "kitchen",
+    "bathroom",
+    "foyer",
+    "corridor",
+    "balcony",
+    "garage",
+    "store room",
+]
 LightCandiateRoom = AllCandiateRoom
+
 
 def generate_instructions():
     instructions = []
@@ -20,12 +34,17 @@ def generate_instructions():
     return instructions
 
 
-def generate_subclass(base_class,attributes, operations):
+def generate_subclass(base_class, attributes, operations):
     class SubClass(base_class):
         def __init__(self, state: str):
             super().__init__(state)
-            self.attributes = {attr: self.attributes[attr] for attr in attributes if attr in self.attributes}
-            self.operations = {op: self.operations[op] for op in operations if op in self.operations}
+            self.attributes = {
+                attr: self.attributes[attr] for attr in attributes if attr in self.attributes
+            }
+            self.operations = {
+                op: self.operations[op] for op in operations if op in self.operations
+            }
+
     return SubClass
 
 
@@ -74,17 +93,15 @@ class VisualMasterBedroom:
         #     self.devices.append(BedDevice())
         # else:
         #     self.unexist_devices.append(BedDevice())
-        
+
         # if random.random() > 0.5:
         #     self.devices.append(random.choice(PetFeederDeviceList)("on"))
         # else:
         #     self.unexist_devices.append(random.choice(PetFeederDeviceList)("on"))
 
-
         self.random_initialize()
         self.state = self.get_status()
         self.devices_name_list = [device.name for device in self.devices]
-
 
     def random_initialize(self):
         for device in self.devices:
@@ -94,8 +111,8 @@ class VisualMasterBedroom:
         state = {"room_name": self.name}
         for device in self.devices:
             state[device.name] = device.get_status()
-        return state    
-    
+        return state
+
     def execute_instructions(self, instructions):
         for instr in instructions:
             if instr["room"] == self.name:
@@ -107,8 +124,8 @@ class VisualMasterBedroom:
         state = self.get_status()
 
         return state
-    
-    def initalzie(self, room_state,methods):
+
+    def initalzie(self, room_state, methods):
         self.devices = []
         self.devices_name_list = []
         for device in room_state.keys():
@@ -116,15 +133,18 @@ class VisualMasterBedroom:
                 continue
             else:
                 attributes = room_state[device]["attributes"].keys()
-                new_device = generate_subclass(device_map[device],attributes,methods[device])
+                new_device = generate_subclass(device_map[device], attributes, methods[device])
                 self.devices.append(new_device(room_state[device]["state"]))
                 self.devices_name_list.append(device)
-                self.devices[-1].initialize(room_state[device]["state"],room_state[device]["attributes"])
-        
+                self.devices[-1].initialize(
+                    room_state[device]["state"], room_state[device]["attributes"]
+                )
+
         self.state = self.get_status()
 
         return self.state
-    
+
+
 class VisualHome:
     def __init__(self) -> None:
         self.rooms = []
@@ -167,7 +187,7 @@ class VisualHome:
         state = self.get_status()
 
         return state
-    
+
     def initalzie(self, home_state):
         methods = {}
         methods_list = home_state["method"]
@@ -182,11 +202,12 @@ class VisualHome:
                 methods[method["room_name"]] = {method["device_name"]: [method["operation"]]}
         for room in self.rooms:
             room_state = home_status[room.name]
-            room.initalzie(room_state,methods[room.name])
+            room.initalzie(room_state, methods[room.name])
         if "vacuum_robot" in home_status.keys():
-            self.VacuumRobot.initialize(home_status["vacuum_robot"]["state"],home_status["vacuum_robot"]["attributes"])
+            self.VacuumRobot.initialize(
+                home_status["vacuum_robot"]["state"], home_status["vacuum_robot"]["attributes"]
+            )
 
         self.state = self.get_status()
 
         return self.state
-    
