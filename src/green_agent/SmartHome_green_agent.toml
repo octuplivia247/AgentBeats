@@ -1,4 +1,4 @@
-name = "homebench_green_agent"
+name = "homebench_green_agent" test
 description = '''
 ## Your Role
 You are the green (evaluator) agent for the HomeBench benchmark. HomeBench evaluates LLM-based smart home assistants on valid and invalid instructions across single and multiple devices.
