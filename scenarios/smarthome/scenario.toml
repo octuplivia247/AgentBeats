@@ -1,0 +1,106 @@
+# Smart Home Evaluation Scenario for AgentBeats
+# This scenario evaluates purple agents on smart home device control tasks
+
+[scenario]
+name = "Smart Home HomeBench Evaluation"
+description = "Systematic evaluation of LLM-based smart home agents on device control tasks"
+version = "1.0.0"
+category = "smart_home"
+
+# Green Agent (Evaluator/Orchestrator)
+[green_agent]
+name = "SmartHome Green Agent"
+command = "python src/green_agent/agent.py --host 0.0.0.0 --port 9001 --mcp http://localhost:9006"
+url = "http://localhost:9001"
+card_path = "src/green_agent/SmartHome_green_agent_mcp.toml"
+
+# Purple Agent (Being Evaluated)
+[[purple_agents]]
+name = "SmartHome Purple Agent"
+role = "executor"
+command = "python -m src.purple_agent.agent --host 0.0.0.0 --port 9000"
+url = "http://localhost:9000"
+card_path = "src/purple_agent/smarthome_purple_agent.toml"
+
+# MCP Server (Smart Home Tools)
+[[services]]
+name = "MCP Server"
+command = "python -m src.green_agent.mcp.mcp_server"
+url = "http://localhost:9006"
+health_endpoint = "/health"
+startup_wait = 3
+
+# Assessment Configuration
+[assessment]
+max_tasks = 10
+max_steps_per_task = 30
+timeout_seconds = 120
+categories = [
+    "normal_single",      # Single device, valid instruction
+    "normal_multiple",    # Multiple devices, valid instruction
+    "invalid_single",     # Single device, invalid instruction
+    "invalid_multiple"    # Multiple devices, invalid instruction
+]
+
+# Environment Configuration
+[environment]
+rooms = ["living_room", "bedroom", "kitchen", "bathroom"]
+device_types = ["light", "thermostat", "lock", "fan", "tv"]
+
+[environment.devices]
+living_room_light = { type = "light", state = "off", brightness = 0 }
+living_room_thermostat = { type = "thermostat", temperature = 70, mode = "off" }
+living_room_tv = { type = "tv", state = "off", channel = 1 }
+bedroom_light = { type = "light", state = "off", brightness = 0 }
+bedroom_lock = { type = "lock", state = "unlocked" }
+kitchen_light = { type = "light", state = "off", brightness = 0 }
+bathroom_fan = { type = "fan", state = "off", speed = 0 }
+
+# Tasks to evaluate (sample - can load from dataset)
+[[tasks]]
+task_id = "task_001"
+category = "normal_single"
+instruction = "Turn on the living room light"
+expected_operations = ["living_room_light.turn_on()"]
+is_valid = true
+
+[[tasks]]
+task_id = "task_002"
+category = "normal_single"
+instruction = "Set the living room thermostat to 72 degrees"
+expected_operations = ["living_room_thermostat.set_temperature(72)"]
+is_valid = true
+
+[[tasks]]
+task_id = "task_003"
+category = "normal_multiple"
+instruction = "Turn on all the lights in the house"
+expected_operations = [
+    "living_room_light.turn_on()",
+    "bedroom_light.turn_on()",
+    "kitchen_light.turn_on()"
+]
+is_valid = true
+
+[[tasks]]
+task_id = "task_004"
+category = "invalid_single"
+instruction = "Turn on the garage door opener"
+expected_response = "reject_invalid_device"
+is_valid = false
+invalid_reason = "device_not_exist"
+
+# Evaluation Metrics
+[metrics]
+compute_exact_match = true
+compute_precision_recall_f1 = true
+per_category_breakdown = true
+error_analysis = true
+
+# Output Configuration
+[output]
+format = "json"
+save_logs = true
+save_artifacts = true
+output_directory = "results/smarthome_eval"
+
