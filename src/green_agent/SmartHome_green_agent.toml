@@ -1,37 +1,270 @@
-name = "smarthome_green_agent"
-description = "The assessment hosting agent for HomeBench evaluation framework."
-version = "0.1.0"
+name = "homebench_green_agent"
+description = '''
+## Your Role
+You are the green (evaluator) agent for the HomeBench benchmark. HomeBench evaluates LLM-based smart home assistants on valid and invalid instructions across single and multiple devices.
 
-defaultInputModes = ["text"]
-defaultOutputModes = ["text"]
+## Responsibilities
+1. **Environment Initialization**: Set up smart home simulation with devices across multiple rooms
+2. **Task Assignment**: Present instructions (both valid and invalid) to purple agents
+3. **Action Validation**: Monitor and validate actions taken by purple agents
+4. **Evaluation**: Assess task completion based on device states and instruction validity
+5. **Scoring**: Calculate success rates for different instruction categories
+
+## HomeBench Task Categories
+- **Valid Single Device**: Instructions targeting one device with correct action
+- **Valid Multi-Device**: Instructions requiring coordination across multiple devices
+- **Invalid Single Device**: Instructions with incorrect/impossible actions on one device
+- **Invalid Multi-Device**: Instructions with invalid actions across multiple devices
+
+## Key Challenges
+- Distinguish between valid and invalid instructions
+- Handle multi-device coordination
+- Detect hallucinated actions or incorrect device targeting
+- Evaluate context-aware responses
+
+## Evaluation Criteria
+This agent performs structured evaluation, including exact-match comparison, 
+precision/recall/F1 scoring, and detailed per-category error analysis.
+
+'''
+version = "1.0.0"
+
+default_input_modes   = ["text/plain", "application/json"]
+default_output_modes  = ["text/plain", "application/json"]
+
 [capabilities]
-streaming = false
+supports_streaming = false
+supports_context = true
+supports_files = false
+
+# Main evaluation orchestration skills
+[[skills]]
+id          = "run_homebench_evaluation"
+name        = "Run HomeBench Evaluation"
+description = "Execute complete HomeBench evaluation for a purple agent across all task categories"
+tags        = ["evaluation", "orchestration", "homebench"]
+examples    = ['''
+Run HomeBench evaluation for the agent at:
+<purple_agent_url>
+http://localhost:8000/
+</purple_agent_url>
+
+Use this configuration:
+<evaluation_config>
+{
+  "benchmark": "homebench",
+  "task_categories": ["valid_single", "valid_multi", "invalid_single", "invalid_multi"],
+  "num_tasks_per_category": 10,
+  "max_actions_per_task": 15,
+  "timeout_seconds": 60,
+  "environment": {
+    "rooms": ["living_room", "bedroom", "kitchen", "bathroom"],
+    "devices_per_room": {
+      "living_room": ["smart_light", "thermostat", "tv", "smart_plug"],
+      "bedroom": ["smart_light", "thermostat", "smart_lock", "curtains"],
+      "kitchen": ["smart_light", "smart_plug", "refrigerator"],
+      "bathroom": ["smart_light", "exhaust_fan"]
+    }
+  },
+  "api_endpoint": "http://YOUR_IP:8001/device_api"
+}
+</evaluation_config>
+''']
+
+# Environment management
+[[skills]]
+id          = "initialize_smart_home"
+name        = "Initialize Smart Home Environment"
+description = "Set up the smart home simulation with all devices and initial states"
+tags        = ["environment", "setup"]
+examples    = ['''
+Initialize smart home with this setup:
+<environment_config>
+{
+  "rooms": ["living_room", "bedroom", "kitchen"],
+  "devices": {
+    "living_room_light": {"type": "light", "state": "off", "brightness": 0},
+    "living_room_thermostat": {"type": "thermostat", "state": "off", "temperature": 70},
+    "bedroom_light": {"type": "light", "state": "off", "brightness": 0},
+    "bedroom_lock": {"type": "lock", "state": "unlocked"},
+    "kitchen_light": {"type": "light", "state": "off", "brightness": 0}
+  },
+  "device_capabilities": {
+    "light": ["turn_on", "turn_off", "set_brightness"],
+    "thermostat": ["turn_on", "turn_off", "set_temperature"],
+    "lock": ["lock", "unlock"]
+  }
+}
+</environment_config>
+''']
+
+# Task assignment
+[[skills]]
+id          = "assign_task"
+name        = "Assign Smart Home Task"
+description = "Send a HomeBench task instruction to the purple agent"
+tags        = ["task", "instruction"]
+examples    = ['''
+Assign this valid single-device task:
+<task>
+{
+  "task_id": "homebench_valid_single_001",
+  "category": "valid_single",
+  "instruction": "Turn on the living room light",
+  "target_devices": ["living_room_light"],
+  "expected_actions": [
+    {"device": "living_room_light", "action": "turn_on"}
+  ],
+  "is_valid": true
+}
+</task>
+''', '''
+Assign this invalid multi-device task:
+<task>
+{
+  "task_id": "homebench_invalid_multi_042",
+  "category": "invalid_multi",
+  "instruction": "Set the bedroom temperature to 150 degrees and turn off the kitchen refrigerator",
+  "target_devices": ["bedroom_thermostat", "kitchen_refrigerator"],
+  "expected_response": "reject_invalid_instruction",
+  "is_valid": false,
+  "invalid_reason": "temperature_out_of_range"
+}
+</task>
+''']
+
+
+# Action monitoring
+[[skills]]
+id          = "monitor_purple_agent_actions"
+name        = "Monitor Purple Agent Actions"
+description = "Track and validate actions taken by the purple agent on smart home devices"
+tags        = ["monitoring", "validation"]
+examples    = ['''
+Monitor actions from purple agent for task: "Make the living room cozy"
+<monitoring_config>
+{
+  "task_id": "homebench_valid_multi_015",
+  "max_actions": 10,
+  "timeout_seconds": 30,
+  "validate_each_action": true,
+  "allowed_devices": ["living_room_light", "living_room_thermostat", "living_room_curtains"]
+}
+</monitoring_config>
+''']
+
+# Evaluation and scoring
+[[skills]]
+id          = "evaluate_task_completion"
+name        = "Evaluate Task Completion"
+description = "Assess whether the purple agent successfully completed the task based on device states and instruction validity"
+tags        = ["evaluation", "scoring"]
+examples    = ['''
+Evaluate task completion:
+<evaluation_input>
+{
+  "task": {
+    "task_id": "homebench_valid_single_001",
+    "instruction": "Turn on the living room light",
+    "category": "valid_single",
+    "is_valid": true,
+    "expected_actions": [{"device": "living_room_light", "action": "turn_on"}]
+  },
+  "purple_agent_actions": [
+    {"device": "living_room_light", "action": "turn_on", "success": true}
+  ],
+  "final_device_states": {
+    "living_room_light": {"state": "on", "brightness": 100}
+  }
+}
+</evaluation_input>
+''']
 
 [[skills]]
-id = "host_assess_smarthome_bench"
-name = "HomeBench asessment hosting"
+id          = "compute_accuracy_metrics"
+name        = "Compute Accuracy, Precision, Recall, F1"
 description = """
-Assess the tool-calling ability of an agent.
-"""
-tags = ["green agent", "assessment hosting", "HomeBench"]
-examples = ["""    
-Your task is to instantiate tau-bench to test the agent located at:
-<white_agent_url>
-http://localhost:9002/
-            
-</white_agent_url>
-You should use the following env configuration:
-<env_config>
-{
-  "env": "retail",
-  "user_strategy": "llm",
-  "user_model": "openai/gpt-4o",
-  "user_provider": "openai",
-  "task_split": "test",
-  "task_ids": [
-    1
-  ]
-}
-</env_config>
-    """]
+Compute evaluation metrics for a set of predicted vs expected operations.
 
+Metrics:
+- EM (Exact Match): prediction list matches gold list (order-independent)
+- Precision: true positives / predicted operations
+- Recall: true positives / gold operations
+- F1 score: harmonic mean of precision and recall
+
+Uses Counter-based multiset intersection logic.
+"""
+tags        = ["metrics", "scoring", "evaluation"]
+examples    = [
+    "Compute EM/Precision/Recall/F1 for predicted and expected outputs",
+    "Return mismatch cases for error analysis"
+]
+input_modes  = ["application/json"]
+output_modes = ["application/json"]
+
+[[skills]]
+id          = "categorize_examples"
+name        = "Categorize Examples by Instruction Type"
+description = """
+Load dataset entries and group them into the same evaluation categories used in HomeBench:
+- normal_single
+- unexist_single
+- unexist_device_single
+- unexist_attribute_single
+- normal_multi
+- mix_multi
+- error_multi
+
+Groupings are determined by 'type' fields such as: 
+normal, unexist_device, unexist_attribute, multi_normal, multi_mix, multi_error.
+"""
+tags        = ["evaluation", "dataset", "categorization"]
+examples    = [
+    "Categorize examples into normal, invalid, multi-device groups",
+    "Split dataset by instruction type for per-category scoring"
+]
+input_modes  = ["application/json"]
+output_modes = ["application/json"]
+
+[[skills]]
+id          = "evaluate_all_categories"
+name        = "Evaluate All Instruction Categories"
+description = """
+Compute metrics for each instruction category:
+
+- all
+- normal_single
+- unexist_single
+- normal_multi
+- mix_multi
+- error_multi
+
+Outputs EM, Precision, Recall, F1 per category following the same logic as the compute_accuracy function.
+"""
+tags        = ["evaluation", "metrics", "homebench"]
+examples    = [
+    "Evaluate normal_single examples",
+    "Compute metrics for mix_multi and error_multi tasks",
+    "Produce aggregated performance summary"
+]
+input_modes  = ["application/json"]
+output_modes = ["application/json"]
+
+[[skills]]
+id          = "write_error_logs"
+name        = "Write Detailed Error Logs"
+description = """
+Generate JSONL files containing mismatched predictions for each category 
+(e.g., normal_multi.json, mix_multi.json, error_multi.json). 
+Each entry includes:
+- generated operations list
+- expected operations list
+Used for downstream debugging of model failures.
+"""
+tags        = ["logging", "debugging", "error-analysis"]
+examples    = [
+    "Write mismatch cases for mix_multi tasks",
+    "Output incorrect predictions to a JSON file"
+]
+input_modes  = ["application/json"]
+output_modes = ["application/json"]
