@@ -135,7 +135,7 @@ class SmartHomeEnvManager:
         or setters, adjust this logic accordingly.
         """
         # Most HomeBench devices can be created with just (room_name, device_name)
-        print(device_cls)
+        #print(device_cls)
         try:
             device = device_cls(state=dev_info['state'])
         except TypeError:
@@ -235,17 +235,30 @@ class SmartHomeEnvManager:
 
 # ---------- JSONL Loader ----------
 
-def load_home_from_jsonl(path: str) -> SmartHomeEnvManager:
+def load_home_from_jsonl(path: str) -> Dict:
     """
     Load a single-line JSONL file describing one home and
     return an initialized SmartHomeEnvManager.
     """
-    with open(path, "r", encoding="utf-8") as f:
-        line = f.readline().strip()
-        if not line:
-            raise ValueError("Empty JSONL file")
+    # with open(path, "r", encoding="utf-8") as f:
+    #     line = f.readline().strip()
+    #     if not line:
+    #         raise ValueError("Empty JSONL file")
 
-        raw = json.loads(line)
+    #     raw = json.loads(line)
+    def load_homes(path):
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                yield json.loads(line)
+
+    homes = {h["home_id"]: h for h in load_homes(path)}
+    return homes
+
+def load_home_from_id(home_id:int, homes: Dict)  -> SmartHomeEnvManager:
+    raw = homes[home_id]
 
     # Parse methods
     methods = [
@@ -271,8 +284,8 @@ def load_home_from_jsonl(path: str) -> SmartHomeEnvManager:
 
 if __name__ == "__main__":
     # Example: adjust path to your JSONL file
-    manager = load_home_from_jsonl("home_0.jsonl")
-
+    homes = load_home_from_jsonl("/Users/yash/AgentX AgentBeats/AgentBeats_Manager/data/home_status_method_all.jsonl")
+    manager = load_home_from_id(0, homes)
     # List rooms and devices
     print("Rooms:", manager.list_rooms())
     print("Devices in master_bedroom:", manager.list_devices("master_bedroom"))
