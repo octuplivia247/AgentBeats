@@ -343,25 +343,19 @@ class HomeBenchMetricsCalculator(MetricsCalculator):
     """
     
     @staticmethod
-    def parse_homebench_output(output: str) -> List[str]:
+    def parse_homebench_output(output: Optional[str]) -> List[str]:
         """
-        Parse HomeBench format output into list of operations
-        
-        Input format: "''' operation1,operation2,'''"
-        Output: ["operation1", "operation2"]
-        
-        Args:
-            output: Raw output string from agent or expected
-            
-        Returns:
-            List of individual operation strings
+        Parse HomeBench format output into list of operations.
+        Handles None inputs safely.
         """
-        # Remove triple quotes and whitespace
-        output = output.replace("'''", "").replace(" ", "").replace("\n", "")
+        if not output:
+            return []
         
-        # Split by comma and filter empty strings
-        operations = output.split(",")
-        operations = [op for op in operations if op != ""]
+        # Remove triple quotes and strip whitespace
+        output = output.replace("'''", "").strip()
+        
+        # Split by comma and strip spaces from each operation
+        operations = [op.strip() for op in output.split(",") if op.strip()]
         
         return operations
     
@@ -495,24 +489,37 @@ def evaluate_agent_output(tasks_with_predictions: List[Dict[str, Any]]) -> Dict[
     return calculator.evaluate_batch(tasks_with_predictions)
 
 
-#this needs to be a tool
 def final_evaluator_results(output_purple_agent) -> float:
     """
     Evaluate the agent output and return ONLY the overall accuracy (avg_exact_match).
-
-    Args:
-        output_purple_agent: List of task dicts with both expected and predicted outputs
-
-    Returns:
-        Overall accuracy score (average exact match) as a float in [0.0, 1.0]
+    Tasks with missing 'predicted_output' are treated as failed.
     """
+    prepared_tasks = []
+    for t in output_purple_agent:
+        task = dict(t)
+        if "predicted_output" not in task or task["predicted_output"] is None:
+            task["predicted_output"] = None  # explicitly mark as missing
+        prepared_tasks.append(task)
+
     # Evaluate all tasks
-    results = evaluate_agent_output(output_purple_agent)
-    
-    # Extract aggregate accuracy
-    overall_accuracy = results['aggregate']['avg_exact_match']
-    
+    results = evaluate_agent_output(prepared_tasks)
+
+    # Recalculate overall accuracy treating missing predicted_output as 0
+    per_task = results.get("per_task", [])
+    if not per_task:
+        return 0.0
+
+    total_exact_match = 0.0
+    for task in per_task:
+        # If predicted_output is None → task failed
+        if task.get("predicted_count", 0) == 0:
+            total_exact_match += 0.0
+        else:
+            total_exact_match += task.get("exact_match", 0.0)
+
+    overall_accuracy = total_exact_match / len(per_task)
     return overall_accuracy
+
 
 
 
