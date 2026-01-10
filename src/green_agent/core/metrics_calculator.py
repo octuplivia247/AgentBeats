@@ -1,5 +1,6 @@
 import re
 from typing import List, Dict, Set, Any, Optional
+import json
 from dataclasses import dataclass
 
 from src.green_agent.core.models import TaskResult
@@ -334,3 +335,174 @@ class MetricsCalculator:
             }
         }
     
+class HomeBenchMetricsCalculator(MetricsCalculator):
+    """
+    Extends MetricsCalculator to handle HomeBench format data
+    Adds parsing logic for the triple-quote format
+    """
+    
+    @staticmethod
+    def parse_homebench_output(output: str) -> List[str]:
+        """
+        Parse HomeBench format output into list of operations
+        
+        Input format: "''' operation1,operation2,'''"
+        Output: ["operation1", "operation2"]
+        
+        Args:
+            output: Raw output string from agent or expected
+            
+        Returns:
+            List of individual operation strings
+        """
+        # Remove triple quotes and whitespace
+        output = output.replace("'''", "").replace(" ", "").replace("\n", "")
+        
+        # Split by comma and filter empty strings
+        operations = output.split(",")
+        operations = [op for op in operations if op != ""]
+        
+        return operations
+    
+    def evaluate_task(self, task_data: Dict[str, Any]) -> Dict[str, float]:
+        """
+        Evaluate a single task in HomeBench format
+        
+        Args:
+            task_data: Dict with keys:
+                - 'id': task identifier
+                - 'expected_output': ground truth output
+                - 'predicted_output': agent's output
+                
+        Returns:
+            Dictionary with metrics:
+                - 'exact_match': 1.0 if perfect match, 0.0 otherwise
+                - 'precision': precision score
+                - 'recall': recall score
+                - 'f1': F1 score
+        """
+        expected = self.parse_homebench_output(task_data['expected_output'])
+        predicted = self.parse_homebench_output(task_data['predicted_output'])
+        
+        return self.compute_metrics(predicted, expected)
+    
+    def evaluate_batch(self, tasks: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Evaluate multiple tasks and return aggregate metrics
+        
+        Args:
+            tasks: List of task dicts with format:
+        
+        Returns:
+            Dictionary with:
+                - 'aggregate': Overall metrics (EM, Precision, Recall, F1)
+                - 'by_category': Metrics broken down by task type
+                - 'per_task': Individual task results
+        """
+        # Convert to TaskResult format for aggregate computation
+        task_results = []
+        for task in tasks:
+            expected = self.parse_homebench_output(task['expected_output'])
+            predicted = self.parse_homebench_output(task['predicted_output'])
+            
+            task_results.append(TaskResult(
+                task_id=task['id'],
+                predicted_operations=predicted,
+                expected_operations=expected,
+                additional_info={'type': task.get('type')}
+            ))
+        
+        # Compute aggregate metrics
+        aggregate = self.compute_aggregate_metrics(task_results)
+        
+        # Compute per-category metrics
+        by_category = self._compute_category_metrics(task_results)
+        
+        # Compute per-task metrics
+        per_task = []
+        for task_result in task_results:
+            metrics = self.compute_metrics(
+                task_result.predicted_operations,
+                task_result.expected_operations
+            )
+            per_task.append({
+                'task_id': task_result.task_id,
+                'type': task_result.additional_info.get('type'),
+                **metrics
+            })
+        
+        return {
+            'aggregate': aggregate,
+            'by_category': by_category,
+            'per_task': per_task
+        }
+    
+    def _compute_category_metrics(
+        self, 
+        task_results: List[TaskResult]
+    ) -> Dict[str, Dict[str, float]]:
+        """
+        Compute metrics grouped by task category
+        
+        Categories: normal, unexist_device, unexist_attribute, 
+                   multi_normal, multi_mix, multi_error
+        """
+        # Group tasks by category
+        categories = {}
+        for result in task_results:
+            task_type = result.additional_info.get('type', 'unknown')
+            if task_type not in categories:
+                categories[task_type] = []
+            categories[task_type].append(result)
+        
+        # Compute metrics for each category
+        category_metrics = {}
+        for cat_name, cat_tasks in categories.items():
+            category_metrics[cat_name] = self.compute_aggregate_metrics(cat_tasks)
+        
+        return category_metrics
+
+
+def evaluate_agent_output(tasks_with_predictions: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Main function to call after purple agent outputs data
+    
+    Args:
+        tasks_with_predictions: List of task dicts with both expected and predicted outputs
+        
+    Returns:
+        Complete evaluation results with aggregate, per-category, and per-task metrics
+    """
+    calculator = HomeBenchMetricsCalculator()
+    return calculator.evaluate_batch(tasks_with_predictions)
+
+
+def final_evaluator_results(output_purple_agent):
+    results = evaluate_agent_output(output_purple_agent)
+    
+    # Print results
+    print("\n" + "="*80)
+    print("EVALUATION RESULTS")
+    print("="*80)
+    
+    # Aggregate metrics
+    agg = results['aggregate']
+    print(f"\nOverall Performance:")
+    print(f"  Exact Match (Accuracy): {agg['avg_exact_match']:.2%}")
+    print(f"  Precision:              {agg['avg_precision']:.2%}")
+    print(f"  Recall:                 {agg['avg_recall']:.2%}")
+    print(f"  F1 Score:               {agg['avg_f1']:.2%}")
+    print(f"  Perfect Tasks:          {agg['perfect_tasks']}/{agg['total_tasks']}")
+    
+    # By category
+    print(f"\nBy Category:")
+    for cat_name, cat_metrics in results['by_category'].items():
+        print(f"  {cat_name}:")
+        print(f"    Accuracy: {cat_metrics['avg_exact_match']:.2%}")
+        print(f"    F1:       {cat_metrics['avg_f1']:.2%}")
+    
+    # Save to file
+    with open('evaluation_results.json', 'w') as f:
+        json.dump(results, f, indent=2)
+    
+    print(f"\nDetailed results saved to: evaluation_results.json")
