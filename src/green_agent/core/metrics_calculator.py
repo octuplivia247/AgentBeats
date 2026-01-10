@@ -2,6 +2,8 @@ import re
 from typing import List, Dict, Set, Any, Optional
 import json
 from dataclasses import dataclass
+import os
+
 
 
 @dataclass
@@ -493,89 +495,68 @@ def evaluate_agent_output(tasks_with_predictions: List[Dict[str, Any]]) -> Dict[
     return calculator.evaluate_batch(tasks_with_predictions)
 
 
-def final_evaluator_results(output_purple_agent):
+#this needs to be a tool
+def final_evaluator_results(output_purple_agent) -> float:
+    """
+    Evaluate the agent output and return ONLY the overall accuracy (avg_exact_match).
+
+    Args:
+        output_purple_agent: List of task dicts with both expected and predicted outputs
+
+    Returns:
+        Overall accuracy score (average exact match) as a float in [0.0, 1.0]
+    """
+    # Evaluate all tasks
     results = evaluate_agent_output(output_purple_agent)
     
-    # Extract agent info from the first task (assuming all tasks are from the same agent)
-    first_task = output_purple_agent[0]
-    agent_id = first_task.get('agent_id', 'agent_dummy')
-    unique_id = first_task.get('unique_id', 247)
-
-    # Wrap aggregate metrics in the desired structure
-    final_results = {
-        "agent_id": agent_id,
-        "unique_id": unique_id,
-        "agent_evaluation_score": results['aggregate']
-    }
-
-    # Print results
-    print("\n" + "="*80)
-    print("EVALUATION RESULTS")
-    print("="*80)
+    # Extract aggregate accuracy
+    overall_accuracy = results['aggregate']['avg_exact_match']
     
-    agg = results['aggregate']
-    print(f"\nOverall Performance:")
-    print(f"  Exact Match (Accuracy): {agg['avg_exact_match']:.2%}")
-    print(f"  Precision:              {agg['avg_precision']:.2%}")
-    print(f"  Recall:                 {agg['avg_recall']:.2%}")
-    print(f"  F1 Score:               {agg['avg_f1']:.2%}")
-    print(f"  Perfect Tasks:          {agg['perfect_tasks']}/{agg['total_tasks']}")
-
-    # Save to JSON file in the desired format
-    with open('evaluation_results.json', 'w') as f:
-        json.dump(final_results, f, indent=2)
-    
-    print(f"\nFinal results saved to: evaluation_results.json")
+    return overall_accuracy
 
 
 
+#################### TESTING #####################
 
 
+# # import your evaluator
+# # make sure this import path is correct
+# # from evaluator import final_evaluator_results
+# # or if same file, you can skip this import
+
+# def load_jsonl(path: str) -> List[Dict[str, Any]]:
+#     """Load a JSONL file into a list of dicts"""
+#     data = []
+#     with open(path, "r") as f:
+#         for line_num, line in enumerate(f, 1):
+#             line = line.strip()
+#             if not line:
+#                 continue
+#             try:
+#                 data.append(json.loads(line))
+#             except json.JSONDecodeError as e:
+#                 raise ValueError(f"JSON error on line {line_num}: {e}")
+#     return data
 
 
-####################
+# def prepare_tasks(tasks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+#     """
+#     Ensure each task has a predicted_output field.
+#     If missing, set it to error_input (common HomeBench baseline).
+#     """
+#     prepared = []
+#     for t in tasks:
+#         task = dict(t)  # shallow copy
 
-import json
-from typing import List, Dict, Any
+#         if "predicted_output" not in task:
+#             # baseline / placeholder prediction
+#             task["predicted_output"] = "'''error_input'''"
 
-# import your evaluator
-# make sure this import path is correct
-# from evaluator import final_evaluator_results
-# or if same file, you can skip this import
+#         prepared.append(task)
 
-def load_jsonl(path: str) -> List[Dict[str, Any]]:
-    """Load a JSONL file into a list of dicts"""
-    data = []
-    with open(path, "r") as f:
-        for line_num, line in enumerate(f, 1):
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                data.append(json.loads(line))
-            except json.JSONDecodeError as e:
-                raise ValueError(f"JSON error on line {line_num}: {e}")
-    return data
+#     return prepared
 
-
-def prepare_tasks(tasks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """
-    Ensure each task has a predicted_output field.
-    If missing, set it to error_input (common HomeBench baseline).
-    """
-    prepared = []
-    for t in tasks:
-        task = dict(t)  # shallow copy
-
-        if "predicted_output" not in task:
-            # baseline / placeholder prediction
-            task["predicted_output"] = "'''error_input'''"
-
-        prepared.append(task)
-
-    return prepared
-
-#for testing purposes
+# #for testing purposes
 # if __name__ == "__main__":
 
 #     with open("subset_20_homebench_4-3-1-1-1.jsonl") as f:
