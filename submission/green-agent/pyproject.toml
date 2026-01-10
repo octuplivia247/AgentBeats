@@ -1,0 +1,27 @@
+[project]
+name = "homebench-green-agent"
+version = "1.0.0"
+description = "HomeBench Green Agent - Evaluates smart home assistants on valid and invalid device control instructions using MCP tools"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "a2a-sdk[http-server]>=0.3.20",
+    "pydantic>=2.12.5",
+    "python-dotenv>=1.2.1",
+    "uvicorn>=0.38.0",
+    "httpx>=0.28.1",
+    "fastapi>=0.115.0",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "httpx>=0.28.1",
+]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = "-ra -q"
+testpaths = ["tests"]
+asyncio_mode = "auto"
