@@ -100,6 +100,9 @@ class TaskCategorizer:
                         categorized["malformed"].append({"line": lineno, "value": obj})
                         continue
 
+                    # Add predicted_output key as a placeholder if not present
+                    obj.setdefault("predicted_output", None)
+
                     type_field = obj.get("type")
                     if type_field is None:
                         categorized["malformed"].append({"line": lineno, "task": obj})
