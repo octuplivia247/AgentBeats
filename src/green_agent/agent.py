@@ -1,7 +1,18 @@
 """
-Green Agent - Assessment Manager for BenchPress Smart Home Assessment
+Green Agent - Evaluation Orchestrator for Smart Home Assessment
+
+This agent evaluates purple agents on HomeBench tasks by:
+1. Setting up smart home environments via MCP
+2. Assigning tasks to purple agents via A2A
+3. Monitoring agent actions via MCP
+4. Computing evaluation metrics
 """
+
 import asyncio
+import json
+import time
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 import uvicorn
 
@@ -9,9 +20,6 @@ try:
     import tomllib
 except ImportError:
     import tomli as tomllib
-
-import json
-import time
 
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.apps import A2AStarletteApplication
@@ -21,259 +29,18 @@ from a2a.server.tasks import InMemoryTaskStore
 from a2a.types import AgentCard
 from a2a.utils import new_agent_text_message
 
+from src.green_agent.core.evaluator import HomeBenchEvaluator
+from src.green_agent.core.smart_home_env_manager import SmartHomeEnvironment
+from src.green_agent.core.task_loader import load_homebench_config, load_tasks_from_dataset
 from src.green_agent.mcp.mcp_client import MCPClient
-from src.utils import parse_tags, my_a2a
+from src.utils import my_a2a, parse_tags
 
 
-def get_env(env_name, user_strategy, user_model, task_split, user_provider=None, task_index=0):
-    """Mock implementation of get_env for testing."""
-
-    class MockEnv:
-        def __init__(self):
-            self.tools_info = []
-            self.wiki = "Smart home environment"
-
-    print(f"Creating mock environment: {env_name}, task {task_index}")
-    return MockEnv()
-
-
-async def ask_agent_to_solve(white_agent_url, env, task_index, max_num_steps=30):
-    """Mock implementation of ask_agent_to_solve for testing."""
-    print(f"Mock evaluation of agent at {white_agent_url}")
-
-    class SolveResult:
-        def __init__(self, reward, info):
-            self.reward = reward
-            self.info = info
-
-    # Simulate evaluation
-    return SolveResult(reward=1, info={"steps": 5})
-
-
-def load_agent_card_toml(agent_name):
-    current_dir = __file__.rsplit("/", 1)[0]
-    with open(f"{current_dir}/{agent_name}.toml", "rb") as f:
+def load_agent_card_toml(agent_name: str) -> Dict[str, Any]:
+    """Load agent card configuration from TOML file."""
+    current_dir = Path(__file__).parent
+    with open(current_dir / f"{agent_name}.toml", "rb") as f:
         return tomllib.load(f)
-
-
-class GreenAgentExecutor(AgentExecutor):
-
-    def __init__(self):
-        pass
-
-    async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
-        # parse the task
-        print("Green agent: Received a task, parsing...")
-        user_input = context.get_user_input()
-        tags = parse_tags(user_input)
-        white_agent_url = tags["white_agent_url"]
-        env_config_str = tags["env_config"]
-        env_config = json.loads(env_config_str)
-
-        # set up the environment
-        # migrate from https://github.com/sierra-research/tau-bench/blob/4754e6b406507dbcbce8e8b3855dcf80aaec18ac/tau_bench/run.py#L20
-        print("Green agent: Setting up the environment...")
-        assert len(env_config["task_ids"]) == 1, "Only single task supported for demo purpose"
-        task_index = env_config["task_ids"][0]
-        env = get_env(
-            env_name=env_config["env"],
-            user_strategy=env_config["user_strategy"],
-            user_model=env_config["user_model"],
-            task_split=env_config["task_split"],
-            user_provider=env_config.get("user_provider", None),
-            task_index=task_index,
-        )
-        metrics = {}
-
-        print("Green agent: Starting evaluation...")
-        timestamp_started = time.time()
-        # TODO: replace
-        # agent = ToolCallingAgent(
-        #     tools_info=env.tools_info,
-        #     wiki=env.wiki,
-        #     model="openai/gpt-4o",
-        #     provider="openai",
-        # )
-        # res = agent.solve(
-        #     env=env,
-        #     task_index=task_index,
-        # )
-        res = await ask_agent_to_solve(white_agent_url, env, task_index)
-
-        metrics["time_used"] = time.time() - timestamp_started
-        result_bool = metrics["success"] = res.reward == 1
-        result_emoji = "✅" if result_bool else "❌"
-
-        print("Green agent: Evaluation complete.")
-        await event_queue.enqueue_event(
-            new_agent_text_message(
-                f"Finished. White agent success: {result_emoji}\nMetrics: {metrics}\n"
-            )
-        )  # alternative, impl as a task-generating agent
-
-    async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
-        raise NotImplementedError
-
-
-class GreenAgentMCPExecutor(AgentExecutor):
-    """Green agent executor using MCP tools for HomeBench evaluation."""
-
-    def __init__(self, mcp_url: str = "http://localhost:9006"):
-        """
-        Initialize the MCP-based executor.
-
-        Args:
-            mcp_url: URL of the MCP server
-        """
-        self.mcp_url = mcp_url
-        self.mcp_client = None
-
-    async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
-        """Execute evaluation using MCP tools."""
-        # Initialize MCP client
-        self.mcp_client = MCPClient(self.mcp_url)
-
-        try:
-            print("Green agent (MCP): Received a task, parsing...")
-            user_input = context.get_user_input()
-            tags = parse_tags(user_input)
-
-            # Parse input - support both old format (white_agent_url) and new format (purple_agent_url)
-            purple_agent_url = tags.get("purple_agent_url") or tags.get("white_agent_url")
-
-            # Parse configuration
-            if "evaluation_config" in tags:
-                # New format
-                config_str = tags["evaluation_config"]
-                evaluation_config = json.loads(config_str)
-            elif "env_config" in tags:
-                # Old format - convert to new format
-                env_config_str = tags["env_config"]
-                env_config = json.loads(env_config_str)
-                evaluation_config = {
-                    "environment": env_config.get("env", "smart_home"),
-                    "task_ids": env_config.get("task_ids", [1]),
-                    "max_steps_per_task": 30,
-                }
-            else:
-                # Default configuration
-                evaluation_config = {"environment": "smart_home", "max_steps_per_task": 30}
-
-            print(f"Green agent (MCP): Evaluating agent at {purple_agent_url}")
-            print(f"Green agent (MCP): Configuration: {json.dumps(evaluation_config, indent=2)}")
-
-            # Step 1: Initialize smart home environment
-            await event_queue.enqueue_event(
-                new_agent_text_message("Initializing smart home environment...")
-            )
-
-            env_config = {
-                "rooms": ["living_room", "bedroom", "kitchen"],
-                "devices": {
-                    "living_room_light": {"type": "light", "state": "off"},
-                    "living_room_thermostat": {"type": "thermostat", "temperature": 70},
-                    "bedroom_light": {"type": "light", "state": "off"},
-                    "kitchen_light": {"type": "light", "state": "off"},
-                },
-            }
-
-            init_result = await self.mcp_client.initialize_smart_home(env_config)
-            print(f"Environment initialized: {init_result}")
-
-            # Step 2: Run evaluation for each task
-            task_ids = evaluation_config.get("task_ids", [1])
-            all_results = []
-
-            await event_queue.enqueue_event(
-                new_agent_text_message(f"Running evaluation for {len(task_ids)} task(s)...")
-            )
-
-            for task_id in task_ids:
-                # Create a sample task
-                task = {
-                    "task_id": f"task_{task_id}",
-                    "instruction": f"Turn on the living room light (Task {task_id})",
-                    "expected_actions": ["turn_on_light"],
-                }
-
-                # Assign task
-                print(f"Assigning task {task_id}...")
-                assign_result = await self.mcp_client.assign_task(task)
-
-                # Monitor actions
-                print(f"Monitoring agent actions for task {task_id}...")
-                monitoring_config = {
-                    "task_id": task["task_id"],
-                    "timeout": evaluation_config.get("max_steps_per_task", 30),
-                }
-                actions = await self.mcp_client.monitor_purple_agent_actions(monitoring_config)
-
-                # Evaluate completion
-                print(f"Evaluating task completion for task {task_id}...")
-                eval_input = {
-                    "task": task,
-                    "actions": actions,
-                    "final_states": {"living_room_light": {"state": "on"}},
-                }
-                eval_result = await self.mcp_client.evaluate_task_completion(eval_input)
-
-                all_results.append(eval_result)
-
-                status = "✅" if eval_result.get("success") else "❌"
-                await event_queue.enqueue_event(
-                    new_agent_text_message(
-                        f"Task {task_id}: {status} (Score: {eval_result.get('score', 0.0)})"
-                    )
-                )
-
-            # Step 3: Compute overall metrics
-            print("Computing accuracy metrics...")
-            predictions = [r.get("predicted_action", "none") for r in all_results]
-            expected = [r.get("expected_action", "none") for r in all_results]
-
-            metrics = await self.mcp_client.compute_accuracy_metrics(predictions, expected)
-
-            # Step 4: Send final results
-            success_count = sum(1 for r in all_results if r.get("success"))
-            total_count = len(all_results)
-            success_rate = success_count / total_count if total_count > 0 else 0
-
-            final_message = f"""
-Evaluation Complete! 🎉
-
-Results:
-- Tasks Completed: {success_count}/{total_count}
-- Success Rate: {success_rate:.1%}
-
-Metrics:
-- Exact Match: {metrics.get('exact_match', 0):.2f}
-- Precision: {metrics.get('precision', 0):.2f}
-- Recall: {metrics.get('recall', 0):.2f}
-- F1 Score: {metrics.get('f1', 0):.2f}
-
-Agent URL: {purple_agent_url}
-"""
-
-            print("Green agent (MCP): Evaluation complete.")
-            await event_queue.enqueue_event(new_agent_text_message(final_message))
-
-        except Exception as e:
-            print(f"Green agent (MCP): Error during execution: {e}")
-            import traceback
-
-            traceback.print_exc()
-            await event_queue.enqueue_event(
-                new_agent_text_message(f"Error during evaluation: {str(e)}")
-            )
-        finally:
-            if self.mcp_client:
-                await self.mcp_client.close()
-
-    async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
-        """Cancel the execution."""
-        if self.mcp_client:
-            await self.mcp_client.close()
-        raise NotImplementedError("Cancellation not fully implemented")
 
 
 class GreenAgentEvaluator(AgentExecutor):
@@ -291,7 +58,7 @@ class GreenAgentEvaluator(AgentExecutor):
     def __init__(self, mcp_url: str = "http://localhost:9006"):
         """Initialize the green agent evaluator."""
         self.mcp_url = mcp_url
-        self.mcp_client = None
+        self.mcp_client: Optional[MCPClient] = None
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         """Execute evaluation of purple agent."""
@@ -312,14 +79,7 @@ class GreenAgentEvaluator(AgentExecutor):
                 raise ValueError("purple_agent_url must be specified")
 
             # Parse configuration
-            if "evaluation_config" in tags:
-                evaluation_config = json.loads(tags["evaluation_config"])
-            else:
-                evaluation_config = {
-                    "environment": "smart_home",
-                    "max_steps_per_task": 30,
-                    "task_ids": [1],
-                }
+            evaluation_config = self._parse_evaluation_config(tags)
 
             print(f"Evaluating purple agent at: {purple_agent_url}")
             print(f"Configuration: {json.dumps(evaluation_config, indent=2)}")
@@ -328,77 +88,211 @@ class GreenAgentEvaluator(AgentExecutor):
                 new_agent_text_message(f"Starting evaluation of purple agent at {purple_agent_url}")
             )
 
-            # Initialize environment
-            env_config = {
-                "rooms": ["living_room", "bedroom", "kitchen"],
-                "devices": {
-                    "living_room_light": {"type": "light", "state": "off"},
-                    "living_room_thermostat": {"type": "thermostat", "temperature": 70},
-                    "bedroom_light": {"type": "light", "state": "off"},
-                    "kitchen_light": {"type": "light", "state": "off"},
-                },
-                "environment_id": f"eval_{int(time.time())}",
-            }
+            # Load environment config
+            env_config = self._load_environment_config(evaluation_config)
+            env_id = f"eval_{int(time.time())}"
+            env_config["environment_id"] = env_id
 
+            # Initialize environment via MCP
             init_result = await self.mcp_client.initialize_smart_home(env_config)
-            env_id = init_result.get("environment_id", "default")
+            print(f"Environment initialized: {init_result}")
 
-            # Run evaluation for each task
-            task_ids = evaluation_config.get("task_ids", [1])
-            all_results = []
+            # Load tasks
+            tasks = self._load_tasks(evaluation_config)
 
-            for task_id in task_ids:
-                task = self._create_task(task_id, env_id)
-
-                # Assign task via A2A
-                if not await my_a2a.wait_agent_ready(purple_agent_url, timeout=10):
-                    raise RuntimeError(f"Purple agent at {purple_agent_url} is not ready")
-
-                task_message = self._format_task_for_purple_agent(task, env_config)
-                await my_a2a.send_message(purple_agent_url, task_message)
-                await asyncio.sleep(2)  # Give time to execute
-
-                # Monitor and evaluate
-                monitoring_config = {
-                    "task_id": task["task_id"],
-                    "environment_id": env_id,
-                    "timeout": evaluation_config.get("max_steps_per_task", 30),
-                }
-
-                actions = await self.mcp_client.monitor_purple_agent_actions(monitoring_config)
-
-                eval_input = {
-                    "task": task,
-                    "actions": actions,
-                    "agent_url": purple_agent_url,
-                    "environment_id": env_id,
-                    "eval_id": f"eval_{task_id}",
-                }
-
-                eval_result = await self.mcp_client.evaluate_task_completion(eval_input)
-                all_results.append(eval_result)
-
-            # Compute metrics
-            predictions = [r.get("predicted_operations", []) for r in all_results]
-            expected = [r.get("expected_operations", []) for r in all_results]
-            flat_predictions = [item for sublist in predictions for item in sublist]
-            flat_expected = [item for sublist in expected for item in sublist]
-
-            metrics = await self.mcp_client.compute_accuracy_metrics(
-                flat_predictions, flat_expected
+            await event_queue.enqueue_event(
+                new_agent_text_message(f"Loaded {len(tasks)} task(s) for evaluation")
             )
 
-            # Generate report
-            success_count = sum(1 for r in all_results if r.get("success"))
-            total_count = len(all_results)
-            success_rate = success_count / total_count if total_count > 0 else 0
+            # Evaluate each task
+            all_results = []
+            for i, task in enumerate(tasks):
+                task["environment_id"] = env_id
 
-            final_message = f"""
+                await event_queue.enqueue_event(
+                    new_agent_text_message(f"Evaluating task {i+1}/{len(tasks)}: {task['task_id']}")
+                )
+
+                result = await self._evaluate_single_task(
+                    task, purple_agent_url, env_id, evaluation_config
+                )
+                all_results.append(result)
+
+                status = "✅" if result.get("success") else "❌"
+                await event_queue.enqueue_event(
+                    new_agent_text_message(
+                        f"Task {task['task_id']}: {status} (Score: {result.get('score', 0.0):.2f})"
+                    )
+                )
+
+            # Compute aggregate metrics
+            metrics = await self._compute_aggregate_metrics(all_results)
+
+            # Generate final report
+            final_message = self._generate_report(
+                purple_agent_url, env_id, all_results, metrics
+            )
+
+            await event_queue.enqueue_event(new_agent_text_message(final_message))
+
+        except Exception as e:
+            error_msg = f"Error during evaluation: {str(e)}"
+            print(error_msg)
+            import traceback
+            traceback.print_exc()
+            await event_queue.enqueue_event(new_agent_text_message(error_msg))
+        finally:
+            if self.mcp_client:
+                await self.mcp_client.close()
+                self.mcp_client = None
+
+    def _parse_evaluation_config(self, tags: Dict[str, str]) -> Dict[str, Any]:
+        """Parse evaluation configuration from tags."""
+        if "evaluation_config" in tags:
+            return json.loads(tags["evaluation_config"])
+        elif "env_config" in tags:
+            env_config = json.loads(tags["env_config"])
+            return {
+                "environment": env_config.get("env", "smart_home"),
+                "task_ids": env_config.get("task_ids", [0]),
+                "max_steps_per_task": 30,
+                "dataset_path": env_config.get("dataset_path", "data/home_status_data.jsonl"),
+                "method_path": env_config.get("method_path", "data/home_status_method.jsonl"),
+            }
+        else:
+            return {
+                "environment": "smart_home",
+                "max_steps_per_task": 30,
+                "task_ids": [0],
+                "dataset_path": "data/home_status_data.jsonl",
+                "method_path": "data/home_status_method.jsonl",
+            }
+
+    def _load_environment_config(self, evaluation_config: Dict[str, Any]) -> Dict[str, Any]:
+        """Load environment configuration."""
+        method_path = evaluation_config.get("method_path", "data/home_status_method.jsonl")
+
+        if Path(method_path).exists():
+            return load_homebench_config(method_path)
+        else:
+            # Fallback to simple config
+            return {
+                "rooms": ["living_room", "bedroom", "kitchen"],
+                "devices": {
+                    "living_room.light": {"type": "light", "state": "off"},
+                    "living_room.thermostat": {"type": "heating", "state": "off"},
+                    "bedroom.light": {"type": "light", "state": "off"},
+                    "kitchen.light": {"type": "light", "state": "off"},
+                },
+            }
+
+    def _load_tasks(self, evaluation_config: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Load tasks for evaluation."""
+        dataset_path = evaluation_config.get("dataset_path", "data/home_status_data.jsonl")
+        task_ids = evaluation_config.get("task_ids")
+
+        if Path(dataset_path).exists():
+            return load_tasks_from_dataset(dataset_path, task_ids)
+        else:
+            # Fallback to default tasks
+            return [
+                {
+                    "task_id": "task_1",
+                    "instruction": "Turn on the living room light",
+                    "expected_operations": ["living_room.light.turn_on()"],
+                    "category": "normal_single",
+                },
+            ]
+
+    async def _evaluate_single_task(
+        self,
+        task: Dict[str, Any],
+        purple_agent_url: str,
+        env_id: str,
+        evaluation_config: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Evaluate a single task."""
+        # Wait for agent to be ready
+        if not await my_a2a.wait_agent_ready(purple_agent_url, timeout=10):
+            return {
+                "task_id": task["task_id"],
+                "success": False,
+                "score": 0.0,
+                "error": "Agent not ready",
+                "predicted_operations": [],
+                "expected_operations": task.get("expected_operations", []),
+            }
+
+        # Format and send task
+        task_message = self._format_task_message(task, env_id)
+        await my_a2a.send_message(purple_agent_url, task_message)
+
+        # Wait for execution
+        wait_time = evaluation_config.get("wait_time", 3.0)
+        await asyncio.sleep(wait_time)
+
+        # Monitor actions
+        monitoring_config = {
+            "task_id": task["task_id"],
+            "environment_id": env_id,
+            "timeout": evaluation_config.get("max_steps_per_task", 30),
+        }
+        actions = await self.mcp_client.monitor_purple_agent_actions(monitoring_config)
+
+        # Evaluate completion
+        eval_input = {
+            "task": task,
+            "actions": actions,
+            "agent_url": purple_agent_url,
+            "environment_id": env_id,
+        }
+        return await self.mcp_client.evaluate_task_completion(eval_input)
+
+    def _format_task_message(self, task: Dict[str, Any], env_id: str) -> str:
+        """Format task as A2A message for purple agent."""
+        return f"""{task['instruction']}
+
+<environment_id>
+{env_id}
+</environment_id>
+
+<task_id>
+{task['task_id']}
+</task_id>
+
+Please use the available MCP tools to complete this task.
+"""
+
+    async def _compute_aggregate_metrics(
+        self, results: List[Dict[str, Any]]
+    ) -> Dict[str, float]:
+        """Compute aggregate metrics from results."""
+        predictions = [r.get("predicted_operations", []) for r in results]
+        expected = [r.get("expected_operations", []) for r in results]
+
+        flat_predictions = [item for sublist in predictions for item in sublist]
+        flat_expected = [item for sublist in expected for item in sublist]
+
+        return await self.mcp_client.compute_accuracy_metrics(flat_predictions, flat_expected)
+
+    def _generate_report(
+        self,
+        agent_url: str,
+        env_id: str,
+        results: List[Dict[str, Any]],
+        metrics: Dict[str, float],
+    ) -> str:
+        """Generate final evaluation report."""
+        success_count = sum(1 for r in results if r.get("success"))
+        total_count = len(results)
+        success_rate = success_count / total_count if total_count > 0 else 0
+
+        return f"""
 ╔═══════════════════════════════════════════════════════════════╗
 ║              EVALUATION COMPLETE                              ║
 ╚═══════════════════════════════════════════════════════════════╝
 
-Purple Agent: {purple_agent_url}
+Purple Agent: {agent_url}
 Environment: {env_id}
 
 Task Results:
@@ -414,86 +308,19 @@ Performance Metrics:
 Evaluation ID: {env_id}
 """
 
-            await event_queue.enqueue_event(new_agent_text_message(final_message))
-
-        except Exception as e:
-            error_msg = f"Error during evaluation: {str(e)}"
-            print(error_msg)
-            import traceback
-
-            traceback.print_exc()
-            await event_queue.enqueue_event(new_agent_text_message(error_msg))
-        finally:
-            if self.mcp_client:
-                await self.mcp_client.close()
-
-    def _create_task(self, task_id: int, env_id: str) -> dict:
-        """Create a task definition."""
-        tasks = {
-            1: {
-                "task_id": f"task_{task_id}",
-                "instruction": "Turn on the living room light",
-                "expected_operations": ["living_room_light.turn_on()"],
-                "category": "normal_single",
-            },
-            2: {
-                "task_id": f"task_{task_id}",
-                "instruction": "Set the living room thermostat to 72 degrees",
-                "expected_operations": ["living_room_thermostat.set_temperature(72)"],
-                "category": "normal_single",
-            },
-            3: {
-                "task_id": f"task_{task_id}",
-                "instruction": "Turn on all the lights in the house",
-                "expected_operations": [
-                    "living_room_light.turn_on()",
-                    "bedroom_light.turn_on()",
-                    "kitchen_light.turn_on()",
-                ],
-                "category": "normal_multiple",
-            },
-        }
-        task = tasks.get(task_id, tasks[1])
-        task["environment_id"] = env_id
-        return task
-
-    def _format_task_for_purple_agent(self, task: dict, env_config: dict) -> str:
-        """Format task as A2A message for purple agent."""
-        tools_info = []
-        for device_name, device_config in env_config.get("devices", {}).items():
-            device_type = device_config.get("type", "unknown")
-            if device_type == "light":
-                tools_info.append(
-                    {"device": device_name, "operations": ["turn_on", "turn_off", "get_state"]}
-                )
-            elif device_type == "thermostat":
-                tools_info.append(
-                    {"device": device_name, "operations": ["set_temperature", "get_temperature"]}
-                )
-
-        return f"""{task['instruction']}
-
-<tools>
-{json.dumps(tools_info, indent=2)}
-</tools>
-
-<environment_id>
-{task.get('environment_id', 'default')}
-</environment_id>
-
-Please use the available MCP tools to complete this task.
-"""
-
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
         """Cancel the evaluation."""
         if self.mcp_client:
             await self.mcp_client.close()
-        raise NotImplementedError("Cancellation not fully implemented")
+            self.mcp_client = None
 
 
 def start_green_agent(
-    agent_name="SmartHome_green_agent", host="localhost", port=9001, mcp_url=None
-):
+    agent_name: str = "SmartHome_green_agent",
+    host: str = "localhost",
+    port: int = 9001,
+    mcp_url: Optional[str] = None,
+) -> None:
     """
     Start the green agent.
 
@@ -501,26 +328,24 @@ def start_green_agent(
         agent_name: Name of the agent configuration file (without .toml extension)
         host: Host to bind the server
         port: Port to bind the server
-        mcp_url: Optional MCP server URL. If provided, uses MCP-based executor.
+        mcp_url: MCP server URL for monitoring (required for evaluation)
     """
     print("=" * 70)
     print("Starting Green Agent (Evaluation Orchestrator)")
     print("=" * 70)
     print(f"Agent URL: http://{host}:{port}")
     if mcp_url:
-        print(f"MCP Server (for monitoring): {mcp_url}")
+        print(f"MCP Server: {mcp_url}")
+    else:
+        print("WARNING: No MCP URL provided. Evaluation will not work properly.")
+        mcp_url = "http://localhost:9006"
     print("=" * 70)
 
     agent_card_dict = load_agent_card_toml(agent_name)
     url = f"http://{host}:{port}"
     agent_card_dict["url"] = url
 
-    # Choose executor
-    if mcp_url:
-        executor = GreenAgentEvaluator(mcp_url=mcp_url)
-    else:
-        print("Using standard executor (mock mode)")
-        executor = GreenAgentExecutor()
+    executor = GreenAgentEvaluator(mcp_url=mcp_url)
 
     request_handler = DefaultRequestHandler(
         agent_executor=executor,

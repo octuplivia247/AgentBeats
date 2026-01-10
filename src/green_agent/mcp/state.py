@@ -1,4 +1,14 @@
+"""
+Global state management for MCP server.
+
+This module provides shared state across MCP tool calls including:
+- Smart home environments
+- Evaluator instances
+- Task results and action logs
+"""
+
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from src.green_agent.core.evaluator import HomeBenchEvaluator

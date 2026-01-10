@@ -5,6 +5,10 @@ Green Agent MCP Server
 This server exposes the HomeBench evaluation tools via both:
 1. MCP protocol (SSE transport)
 2. Simple HTTP REST API for easier testing
+
+Tools are divided into:
+- Device Control: For purple agent to control smart home devices
+- Evaluation: For green agent to monitor and compute metrics
 """
 
 import asyncio
@@ -24,10 +28,9 @@ from src.green_agent.core.categorizer import TaskCategorizer
 from src.green_agent.core.evaluator import AgentCommunicator
 from src.green_agent.core.metrics_calculator import MetricsCalculator
 from src.green_agent.core.models.task_result import TaskResult
+from src.green_agent.core.smart_home_env_manager import SmartHomeEnvironment
+from src.green_agent.mcp.models.models import ToolCallRequest, ToolCallResponse
 from src.green_agent.mcp.state import GlobalState
-
-# Add parent directories to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 # Configure logging
 logging.basicConfig(
@@ -35,13 +38,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-
-from src.green_agent.mcp.models.models import ToolCallRequest, ToolCallResponse
-
+# Initialize servers
 mcp_server = FastMCP("HomeBench Green Agent MCP", version="1.0.0")
-
 http_app = FastAPI(title="HomeBench MCP HTTP Wrapper")
-
 
 # Tool Registry
 TOOLS = {}
@@ -57,6 +56,10 @@ def register_tool(func):
 state = GlobalState()
 
 
+# ==============================================================================
+# DEVICE CONTROL TOOLS (for Purple Agent)
+# ==============================================================================
+
 
 @mcp_server.tool
 @register_tool
@@ -67,7 +70,7 @@ def control_device(
     Control a smart home device.
 
     Args:
-        device_name: Name of the device (e.g., "living_room_light")
+        device_name: Name of the device (e.g., "living_room.light" or "living_room_light")
         action: Action to perform (e.g., "turn_on", "turn_off", "set_temperature")
         parameters: Optional parameters for the action (e.g., {"temperature": 72})
 
@@ -75,52 +78,34 @@ def control_device(
         Result of the device control operation
     """
     logger.info(f"Controlling device: {device_name}, action: {action}, parameters: {parameters}")
+    parameters = parameters or {}
 
     try:
         env_id = state.current_env_id or "default"
         environment = state.get_or_create_environment(env_id)
 
-        if device_name not in environment.devices:
-            logger.warning(f"Device {device_name} not found in environment {env_id}")
+        if not environment.initialized:
             return {
                 "success": False,
-                "error": f"Device '{device_name}' not found",
+                "error": "Environment not initialized",
                 "device": device_name,
                 "action": action,
             }
 
-        # Log the action
-        from src.green_agent.mcp.state import ActionLog
+        # Execute action via SmartHomeEnvironment
+        result = environment.execute_action(device_name, action, parameters)
 
-        action_log = ActionLog(
-            timestamp=datetime.now().isoformat(),
-            device_name=device_name,
-            action=action,
-            parameters=parameters or {},
-            success=True,
-            error=None,
-        )
-        environment.action_log.append(action_log)
-
-        logger.info(f"Device {device_name} {action} executed successfully")
+        logger.info(f"Device {device_name} {action}: success={result.success}")
 
         return {
-            "success": True,
+            "success": result.success,
             "device": device_name,
             "action": action,
             "parameters": parameters,
-            "message": f"Successfully executed {action} on {device_name}",
+            "message": f"Successfully executed {action} on {device_name}" if result.success else result.error,
+            "error": result.error if not result.success else None,
         }
 
-    except NotImplementedError as e:
-        logger.warning(f"Device control not fully implemented: {e}")
-        return {
-            "success": False,
-            "device": device_name,
-            "action": action,
-            "error": "not_implemented",
-            "message": str(e),
-        }
     except Exception as e:
         logger.error(f"Error controlling device {device_name}: {e}")
         logger.debug(traceback.format_exc())
@@ -145,18 +130,15 @@ def get_device_state(device_name: str) -> Dict[str, Any]:
         env_id = state.current_env_id or "default"
         environment = state.get_or_create_environment(env_id)
 
-        if device_name not in environment.devices:
-            return {"success": False, "error": f"Device '{device_name}' not found"}
+        device_state = environment.get_device_state(device_name)
 
-        device = environment.devices[device_name]
+        if device_state is None:
+            return {"success": False, "error": f"Device '{device_name}' not found"}
 
         return {
             "success": True,
             "device": device_name,
-            "state": {
-                "type": getattr(device, "type", "unknown"),
-                "status": getattr(device, "status", "unknown"),
-            },
+            "state": device_state,
         }
 
     except Exception as e:
@@ -214,19 +196,16 @@ def run_homebench_evaluation(
     Returns:
         Dictionary containing evaluation results
     """
-    print(f"Starting HomeBench evaluation for {purple_agent_url}")
-    print(f"Config: {evaluation_config}")
+    logger.info(f"Starting HomeBench evaluation for {purple_agent_url}")
+    logger.info(f"Config: {evaluation_config}")
 
-    eval_id = f"eval_{purple_agent_url}_{hash(json.dumps(evaluation_config))}"
+    eval_id = f"eval_{purple_agent_url}_{hash(json.dumps(evaluation_config, sort_keys=True))}"
     evaluator = state.get_or_create_evaluator(purple_agent_url, eval_id)
 
-    dataset_path = evaluation_config.get("dataset_path", "data/home_status_data.jsonl")
-
-    env_config = evaluation_config.get(
-        "environment_config", {"rooms": ["living_room", "bedroom", "kitchen"], "devices": {}}
-    )
-
-    evaluator.environment.initialize(env_config)
+    # Initialize environment if config provided
+    env_config = evaluation_config.get("environment_config")
+    if env_config:
+        evaluator.environment.initialize(env_config)
 
     return {
         "status": "started",
@@ -243,58 +222,34 @@ def initialize_smart_home(environment_config: Dict[str, Any]) -> Dict[str, Any]:
     Set up the smart home simulation with all devices and initial states.
 
     Args:
-        environment_config: Configuration for the smart home environment
+        environment_config: Configuration for the smart home environment.
+            Supports both HomeBench JSONL format and simple config format.
 
     Returns:
         Status of initialization
     """
     try:
         logger.info("Initializing smart home environment...")
-        logger.info(f"Rooms: {environment_config.get('rooms', [])}")
-        logger.info(f"Devices: {len(environment_config.get('devices', {}))} devices configured")
 
         env_id = environment_config.get("environment_id", "default")
         environment = state.get_or_create_environment(env_id)
 
-        # Create simple mock devices directly in the environment
-        # This is a basic implementation until SmartHomeEnvironment.initialize() is fully implemented
-        devices_config = environment_config.get("devices", {})
+        # Initialize using SmartHomeEnvironment
+        result = environment.initialize(environment_config)
 
-        # Simple device class
-        class MockDevice:
-            def __init__(self, name, device_type, config):
-                self.name = name
-                self.type = device_type
-                self.config = config
-                self.status = config.get("state", "unknown")
-
-        # Create devices
-        for device_name, device_config in devices_config.items():
-            device_type = device_config.get("type", "unknown")
-            environment.devices[device_name] = MockDevice(device_name, device_type, device_config)
-            logger.info(f"Created device: {device_name} (type: {device_type})")
-
-        environment.initialized = True
         state.current_env_id = env_id
 
-        device_count = len(environment.devices)
-        logger.info(f"Environment {env_id} initialized with {device_count} devices")
+        logger.info(f"Environment {env_id} initialized with {result.get('device_count', 0)} devices")
 
         return {
             "status": "success",
-            "device_count": device_count,
-            "devices": list(environment.devices.keys()),
+            "device_count": result.get("device_count", 0),
+            "devices": result.get("devices", []),
             "environment_id": env_id,
             "initialized": True,
+            "rooms": result.get("rooms", []),
         }
-    except NotImplementedError as e:
-        logger.warning(f"Method not implemented: {e}")
-        return {
-            "status": "not_implemented",
-            "error": str(e),
-            "message": "This method needs to be implemented by the team. See src/green_agent/evaluator.py",
-            "environment_id": environment_config.get("environment_id", "default"),
-        }
+
     except Exception as e:
         logger.error(f"Error initializing environment: {e}")
         logger.debug(traceback.format_exc())
@@ -317,21 +272,14 @@ def assign_task(task: Dict[str, Any]) -> Dict[str, Any]:
     Returns:
         The response from the purple agent
     """
-    print(f"Assigning task: {task.get('task_id')}")
-    print(f"Instruction: {task.get('instruction')}")
+    logger.info(f"Assigning task: {task.get('task_id')}")
+    logger.info(f"Instruction: {task.get('instruction')}")
 
     agent_url = task.get("agent_url", "http://localhost:9000")
-
     communicator = AgentCommunicator(agent_url)
 
     env = state.get_or_create_environment(state.current_env_id or "default")
-    tools_info = [
-        {
-            "device": device_name,
-            "operations": list(device.operations.keys()) if hasattr(device, "operations") else [],
-        }
-        for device_name, device in env.devices.items()
-    ]
+    tools_info = env.get_tools_info()
 
     try:
         loop = asyncio.get_event_loop()
@@ -340,7 +288,6 @@ def assign_task(task: Dict[str, Any]) -> Dict[str, Any]:
         asyncio.set_event_loop(loop)
 
     if loop.is_running():
-
         return {
             "task_id": task.get("task_id"),
             "status": "queued",
@@ -348,7 +295,11 @@ def assign_task(task: Dict[str, Any]) -> Dict[str, Any]:
         }
     else:
         response = loop.run_until_complete(
-            communicator.send_task(task.get("instruction", ""), tools_info)
+            communicator.send_task(
+                task.get("instruction", ""),
+                tools_info,
+                task.get("environment_id"),
+            )
         )
 
         return {
@@ -366,7 +317,7 @@ def monitor_purple_agent_actions(monitoring_config: Dict[str, Any]) -> List[Dict
     Track and validate actions taken by the purple agent on smart home devices.
 
     Args:
-        monitoring_config: Configuration for monitoring (timeout, allowed devices, etc.)
+        monitoring_config: Configuration for monitoring (timeout, task_id, etc.)
 
     Returns:
         List of actions taken by the agent
@@ -392,15 +343,7 @@ def monitor_purple_agent_actions(monitoring_config: Dict[str, Any]) -> List[Dict
             }
             for action in actions
         ]
-    except NotImplementedError as e:
-        logger.warning(f"Method not implemented: {e}")
-        return [
-            {
-                "error": "not_implemented",
-                "message": str(e),
-                "note": "See src/green_agent/evaluator.py to implement this method",
-            }
-        ]
+
     except Exception as e:
         logger.error(f"Error monitoring actions: {e}")
         logger.debug(traceback.format_exc())
@@ -411,7 +354,7 @@ def monitor_purple_agent_actions(monitoring_config: Dict[str, Any]) -> List[Dict
 @register_tool
 def evaluate_task_completion(evaluation_input: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Assess whether the purple agent successfully completed the task based on device states and instruction validity.
+    Assess whether the purple agent successfully completed the task.
 
     Args:
         evaluation_input: Dictionary containing task, agent actions, and final device states
@@ -419,12 +362,12 @@ def evaluate_task_completion(evaluation_input: Dict[str, Any]) -> Dict[str, Any]
     Returns:
         Evaluation result including success status and score
     """
-    # Handle case where evaluation_input might be a string (parse it)
+    # Handle string input
     if isinstance(evaluation_input, str):
         try:
             evaluation_input = json.loads(evaluation_input)
         except json.JSONDecodeError:
-            logger.error(f"Failed to parse evaluation_input as JSON: {evaluation_input}")
+            logger.error(f"Failed to parse evaluation_input as JSON")
             return {
                 "task_id": "unknown",
                 "success": False,
@@ -435,77 +378,37 @@ def evaluate_task_completion(evaluation_input: Dict[str, Any]) -> Dict[str, Any]
 
     task = evaluation_input.get("task", {})
     task_id = task.get("task_id", "unknown") if isinstance(task, dict) else "unknown"
-    print(f"Evaluating completion for task: {task_id}")
+    logger.info(f"Evaluating completion for task: {task_id}")
 
-    agent_url = evaluation_input.get("agent_url", "http://localhost:9000")
-    eval_id = evaluation_input.get("eval_id", "default")
+    expected_ops = task.get("expected_operations", []) if isinstance(task, dict) else []
+    actions = evaluation_input.get("actions", [])
 
-    evaluator = state.get_or_create_evaluator(agent_url, eval_id)
-
-    env_id = evaluation_input.get("environment_id", state.current_env_id or "default")
-    evaluator.environment = state.get_or_create_environment(env_id)
-
-    # Run async evaluation
-    try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-
-    if loop.is_running():
-
-        expected_ops = task.get("expected_operations", []) if isinstance(task, dict) else []
-        actions = evaluation_input.get("actions", [])
-
-        # Handle actions that might be dicts with error info
-        predicted_ops = []
-        for a in actions:
-            if isinstance(a, dict) and a.get("success"):
-                device = a.get("device", "unknown")
-                action = a.get("action", "unknown")
+    # Extract predicted operations from actions
+    predicted_ops = []
+    for a in actions:
+        if isinstance(a, dict) and a.get("success"):
+            device = a.get("device", "unknown")
+            action = a.get("action", "unknown")
+            params = a.get("parameters", {})
+            if params:
+                param_str = ", ".join(f"{k}={v}" for k, v in params.items())
+                predicted_ops.append(f"{device}.{action}({param_str})")
+            else:
                 predicted_ops.append(f"{device}.{action}()")
 
-        # Simple fallback metrics if MetricsCalculator not implemented
-        try:
-            metrics = MetricsCalculator.compute_metrics(predicted_ops, expected_ops)
-        except NotImplementedError:
-            # Simple exact match fallback
-            metrics = {
-                "exact_match": 1.0 if set(predicted_ops) == set(expected_ops) else 0.0,
-                "precision": (
-                    1.0 if predicted_ops and set(predicted_ops).issubset(set(expected_ops)) else 0.0
-                ),
-                "recall": (
-                    1.0 if expected_ops and set(expected_ops).issubset(set(predicted_ops)) else 0.0
-                ),
-                "f1": 1.0 if set(predicted_ops) == set(expected_ops) else 0.0,
-            }
+    # Compute metrics
+    metrics_calc = MetricsCalculator()
+    metrics = metrics_calc.compute_metrics(predicted_ops, expected_ops)
 
-        return {
-            "task_id": task_id,
-            "success": metrics["exact_match"] == 1.0,
-            "score": metrics["f1"],
-            "feedback": f"F1: {metrics['f1']:.2f}, EM: {metrics['exact_match']:.2f}",
-            "metrics": metrics,
-            "predicted_operations": predicted_ops,
-            "expected_operations": expected_ops,
-        }
-    else:
-        result = loop.run_until_complete(evaluator.evaluate_task(task))
-
-        if eval_id not in state.task_results:
-            state.task_results[eval_id] = []
-        state.task_results[eval_id].append(result)
-
-        return {
-            "task_id": result.task_id,
-            "success": result.success,
-            "score": result.score,
-            "feedback": result.feedback,
-            "predicted_operations": result.predicted_operations,
-            "expected_operations": result.expected_operations,
-            "execution_time": result.execution_time,
-        }
+    return {
+        "task_id": task_id,
+        "success": metrics["exact_match"] == 1.0,
+        "score": metrics["f1"],
+        "feedback": f"F1: {metrics['f1']:.2f}, EM: {metrics['exact_match']:.2f}",
+        "metrics": metrics,
+        "predicted_operations": predicted_ops,
+        "expected_operations": expected_ops,
+    }
 
 
 @mcp_server.tool
@@ -530,22 +433,13 @@ def compute_accuracy_metrics(predictions: List[Any], expected: List[Any]) -> Dic
         pred_strs = [str(p) for p in predictions]
         exp_strs = [str(e) for e in expected]
 
-        metrics = MetricsCalculator.compute_metrics(pred_strs, exp_strs)
+        metrics_calc = MetricsCalculator()
+        metrics = metrics_calc.compute_metrics(pred_strs, exp_strs)
 
         logger.info(f"Results: EM={metrics['exact_match']:.2f}, F1={metrics['f1']:.2f}")
 
         return metrics
-    except NotImplementedError as e:
-        logger.warning(f"Method not implemented: {e}")
-        return {
-            "exact_match": 0.0,
-            "precision": 0.0,
-            "recall": 0.0,
-            "f1": 0.0,
-            "error": "not_implemented",
-            "message": str(e),
-            "note": "See src/green_agent/evaluator.py to implement MetricsCalculator",
-        }
+
     except Exception as e:
         logger.error(f"Error computing metrics: {e}")
         logger.debug(traceback.format_exc())
@@ -564,16 +458,16 @@ def categorize_examples(dataset_path: str) -> Dict[str, int]:
     Returns:
         Dictionary with counts per category
     """
-    print(f"Categorizing examples from {dataset_path}")
+    logger.info(f"Categorizing examples from {dataset_path}")
 
     categorized = TaskCategorizer.load_and_categorize_dataset(dataset_path)
 
     counts = {category: len(examples) for category, examples in categorized.items()}
 
-    print(f"Categorization complete: {sum(counts.values())} total examples")
+    logger.info(f"Categorization complete: {sum(counts.values())} total examples")
     for category, count in counts.items():
         if count > 0:
-            print(f"  {category}: {count}")
+            logger.info(f"  {category}: {count}")
 
     return counts
 
@@ -590,27 +484,23 @@ def evaluate_all_categories(results_path: str) -> Dict[str, Dict[str, float]]:
     Returns:
         Dictionary mapping categories to their metrics
     """
-    print(f"Evaluating all categories from {results_path}")
+    logger.info(f"Evaluating all categories from {results_path}")
 
     try:
-        results_by_category: Dict[str, List[TaskResult]] = {}
+        results_by_category: Dict[str, List[Dict]] = {}
+        metrics_calc = MetricsCalculator()
 
         with open(results_path, "r") as f:
             for line in f:
                 if line.strip():
                     result_dict = json.loads(line)
-                    # Reconstruct TaskResult (simplified)
                     category = result_dict.get("category", "normal_single")
                     if category not in results_by_category:
                         results_by_category[category] = []
-
-                    # For metrics, we only need predictions and expected
-                    predicted = result_dict.get("predicted_operations", [])
-                    expected = result_dict.get("expected_operations", [])
-
-                    results_by_category[category].append(
-                        {"predicted": predicted, "expected": expected}
-                    )
+                    results_by_category[category].append({
+                        "predicted": result_dict.get("predicted_operations", []),
+                        "expected": result_dict.get("expected_operations", []),
+                    })
 
         # Compute metrics for each category
         category_metrics = {}
@@ -628,26 +518,25 @@ def evaluate_all_categories(results_path: str) -> Dict[str, Dict[str, float]]:
                 all_expected.extend(result["expected"])
 
             if cat_predicted or cat_expected:
-                category_metrics[category] = MetricsCalculator.compute_metrics(
+                category_metrics[category] = metrics_calc.compute_metrics(
                     cat_predicted, cat_expected
                 )
 
         if all_predicted or all_expected:
-            category_metrics["all"] = MetricsCalculator.compute_metrics(all_predicted, all_expected)
+            category_metrics["all"] = metrics_calc.compute_metrics(all_predicted, all_expected)
 
-        print(f"Evaluated {len(results_by_category)} categories")
+        logger.info(f"Evaluated {len(results_by_category)} categories")
 
         return category_metrics
 
     except FileNotFoundError:
-        print(f"Results file not found: {results_path}")
-        print("Returning metrics from in-memory state instead")
+        logger.error(f"Results file not found: {results_path}")
 
         # Fall back to in-memory results
         category_metrics = {}
+        metrics_calc = MetricsCalculator()
 
         for eval_id, results in state.task_results.items():
-            # Group by category
             results_by_cat: Dict[str, List[TaskResult]] = {}
             for result in results:
                 cat = result.category
@@ -655,20 +544,18 @@ def evaluate_all_categories(results_path: str) -> Dict[str, Dict[str, float]]:
                     results_by_cat[cat] = []
                 results_by_cat[cat].append(result)
 
-            # Compute metrics per category
             for category, cat_results in results_by_cat.items():
                 if category not in category_metrics:
-                    category_metrics[category] = MetricsCalculator.compute_aggregate_metrics(
+                    category_metrics[category] = metrics_calc.compute_aggregate_metrics(
                         cat_results
                     )
 
-        # Compute overall
         all_results = []
         for results in state.task_results.values():
             all_results.extend(results)
 
         if all_results:
-            category_metrics["all"] = MetricsCalculator.compute_aggregate_metrics(all_results)
+            category_metrics["all"] = metrics_calc.compute_aggregate_metrics(all_results)
 
         return category_metrics
 
@@ -687,39 +574,33 @@ def write_error_logs(predictions: List[Any], expected: List[Any], output_dir: st
     Returns:
         Path to the generated error logs
     """
-    print(f"Writing error logs to {output_dir}")
-
-    from pathlib import Path
+    logger.info(f"Writing error logs to {output_dir}")
 
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
+    metrics_calc = MetricsCalculator()
     errors = []
+
     for i, (pred, exp) in enumerate(zip(predictions, expected)):
         pred_str = str(pred)
         exp_str = str(exp)
 
-        if MetricsCalculator.normalize_operation(pred_str) != MetricsCalculator.normalize_operation(
-            exp_str
-        ):
-            errors.append(
-                {
-                    "index": i,
-                    "predicted": pred_str,
-                    "expected": exp_str,
-                    "timestamp": datetime.now().isoformat(),
-                }
-            )
+        if metrics_calc.normalize_operation(pred_str) != metrics_calc.normalize_operation(exp_str):
+            errors.append({
+                "index": i,
+                "predicted": pred_str,
+                "expected": exp_str,
+                "timestamp": datetime.now().isoformat(),
+            })
 
     if len(predictions) != len(expected):
-        errors.append(
-            {
-                "error": "length_mismatch",
-                "predicted_count": len(predictions),
-                "expected_count": len(expected),
-                "timestamp": datetime.now().isoformat(),
-            }
-        )
+        errors.append({
+            "error": "length_mismatch",
+            "predicted_count": len(predictions),
+            "expected_count": len(expected),
+            "timestamp": datetime.now().isoformat(),
+        })
 
     # Write to file
     error_log_path = output_path / "error_logs.jsonl"
@@ -727,12 +608,16 @@ def write_error_logs(predictions: List[Any], expected: List[Any], output_dir: st
         for error in errors:
             f.write(json.dumps(error) + "\n")
 
-    print(f"Wrote {len(errors)} errors to {error_log_path}")
+    logger.info(f"Wrote {len(errors)} errors to {error_log_path}")
 
     return str(error_log_path)
 
 
-# HTTP API endpoints
+# ==============================================================================
+# HTTP API ENDPOINTS
+# ==============================================================================
+
+
 @http_app.get("/")
 async def root():
     """Root endpoint showing available tools."""
@@ -745,7 +630,7 @@ async def root():
 
 
 @http_app.get("/tools")
-async def list_tools():
+async def list_tools_endpoint():
     """List all available tools."""
     return {"tools": [{"name": name, "description": func.__doc__} for name, func in TOOLS.items()]}
 
@@ -823,11 +708,10 @@ if __name__ == "__main__":
     print("=" * 70)
     print("Starting HomeBench Green Agent MCP Server")
     print("=" * 70)
-    print(f"HTTP API: http://localhost:9006")
-    print(f"  - Root: http://localhost:9006/")
-    print(f"  - List tools: http://localhost:9006/tools")
-    print(f"  - Call tool: POST http://localhost:9006/tools/call")
+    print("HTTP API: http://localhost:9006")
+    print("  - Root: http://localhost:9006/")
+    print("  - List tools: http://localhost:9006/tools")
+    print("  - Call tool: POST http://localhost:9006/tools/call")
     print("=" * 70)
 
-    # Run HTTP API server (FastAPI with uvicorn)
     uvicorn.run(http_app, host="localhost", port=9006)

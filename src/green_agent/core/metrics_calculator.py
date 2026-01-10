@@ -1,24 +1,8 @@
 import re
-from typing import List, Dict, Set, Any, Optional
-from dataclasses import dataclass
+from typing import List, Dict, Set, Any, Optional, TYPE_CHECKING
 
-from src.green_agent.core.models import TaskResult
-
-@dataclass
-class TaskResult:
-    """
-    Represents the result of a task execution.
-    
-    Attributes:
-        task_id: Unique identifier for the task
-        predicted_operations: List of operations predicted/executed by the agent
-        expected_operations: List of operations that were expected
-        additional_info: Optional dictionary for extra metadata
-    """
-    task_id: str
-    predicted_operations: List[str]
-    expected_operations: List[str]
-    additional_info: Optional[Dict[str, Any]] = None
+if TYPE_CHECKING:
+    from src.green_agent.core.models.task_result import TaskResult
 
 
 class MetricsCalculator:
@@ -229,9 +213,14 @@ class MetricsCalculator:
             'f1': f1
         }
     
+    @classmethod
+    def compute(cls, predicted: List[str], expected: List[str]) -> Dict[str, float]:
+        """Class method to compute metrics without instantiation."""
+        return cls().compute_metrics(predicted, expected)
+    
     def compute_aggregate_metrics(
         self,
-        task_results: List[TaskResult]
+        task_results: List["TaskResult"]
     ) -> Dict[str, float]:
         """
         Aggregate metrics across multiple TaskResult objects. Summary of agent performance
@@ -293,7 +282,7 @@ class MetricsCalculator:
     
     def compute_detailed_report(
         self,
-        task_results: List[TaskResult]
+        task_results: List["TaskResult"]
     ) -> Dict[str, Any]:
         """
         Generate a detailed evaluation report with breakdown.
