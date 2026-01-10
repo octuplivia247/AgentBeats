@@ -61,6 +61,7 @@ class SmartHomeEnvManager:
         return sorted(self.rooms.get(room_name, {}).keys())
 
     def get_device(self, room_name: str, device_name: str) -> Any:
+        """Get a device by room and device name."""
         return self.rooms[room_name][device_name]
 
     def call(

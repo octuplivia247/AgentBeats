@@ -52,7 +52,7 @@ run-purple:  ## Run purple agent only
 	python main.py purple
 
 run-green:  ## Run green agent only
-	python main.py green --mcp http://localhost:9006
+	python main.py green --mcp-url http://localhost:9006
 
 test-quick:  ## Run quick test of purple agent
 	python main.py test-purple

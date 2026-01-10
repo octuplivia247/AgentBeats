@@ -67,3 +67,5 @@ logs/
 data/*.jsonl.bak
 data/*.csv
 *.pid
+
+./.idea

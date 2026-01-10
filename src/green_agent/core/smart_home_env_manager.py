@@ -16,6 +16,7 @@ from src.green_agent.core.manager2 import (
     HomeConfig,
     SmartHomeEnvManager,
     load_home_from_jsonl,
+    load_home_from_id,
 )
 
 
@@ -132,20 +133,36 @@ class SmartHomeEnvironment:
 
     @classmethod
     def from_jsonl(
-        cls, method_path: str, status_path: Optional[str] = None
+        cls, method_path: str, home_id: Optional[int] = None
     ) -> "SmartHomeEnvironment":
         """
         Create environment from JSONL files.
 
         Args:
-            method_path: Path to home_status_method.jsonl
-            status_path: Optional path to home_status_data.jsonl (uses same file if not provided)
+            method_path: Path to home_status_method.jsonl or home_status_method_all.jsonl
+            home_id: Optional home ID to load. If None, loads first home found.
 
         Returns:
             Initialized SmartHomeEnvironment
         """
         env = cls()
-        env._manager = load_home_from_jsonl(method_path)
+        
+        # Load all homes from JSONL
+        homes = load_home_from_jsonl(method_path)
+        
+        # Select home_id
+        if home_id is None:
+            # Use first available home
+            if homes:
+                home_id = next(iter(homes.keys()))
+            else:
+                raise ValueError("No homes found in JSONL file")
+        
+        if home_id not in homes:
+            available = list(homes.keys())[:10]
+            raise ValueError(f"Home ID {home_id} not found. Available: {available}")
+        
+        env._manager = load_home_from_id(home_id, homes)
         env.home_id = env._manager.home_id
         env.initialized = True
 
@@ -159,6 +176,25 @@ class SmartHomeEnvironment:
                     env.device_states[full_name] = device.get_status()
 
         return env
+    
+    @classmethod
+    def load_all_homes(cls, method_path: str) -> Dict[int, "SmartHomeEnvironment"]:
+        """
+        Load all homes from a JSONL file.
+
+        Args:
+            method_path: Path to home_status_method_all.jsonl
+
+        Returns:
+            Dictionary mapping home_id to SmartHomeEnvironment
+        """
+        homes_raw = load_home_from_jsonl(method_path)
+        environments = {}
+        
+        for home_id in homes_raw.keys():
+            environments[home_id] = cls.from_jsonl(method_path, home_id=home_id)
+        
+        return environments
 
     def initialize(self, config: Dict[str, Any]) -> Dict[str, Any]:
         """

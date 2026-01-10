@@ -181,9 +181,11 @@ Available MCP Tools:
 {tools_desc}
 
 HOW TO CONTROL DEVICES:
+Device names use the format: room_name.device_name (e.g., "living_room.light", "master_bedroom.air_conditioner")
+
 When you receive a task like "Turn on the living room light", you should:
-1. Identify the device name (e.g., "living_room_light")
-2. Identify the action (e.g., "turn_on")
+1. Find the EXACT device name from the <tools> section (e.g., "living_room.light")
+2. Identify the action from the device's available operations
 3. Call the control_device tool using the format below
 
 TOOL CALL FORMAT:
@@ -191,7 +193,7 @@ TOOL CALL FORMAT:
 {{
   "name": "control_device",
   "arguments": {{
-    "device_name": "living_room_light",
+    "device_name": "living_room.light",
     "action": "turn_on",
     "parameters": {{}}
   }}
@@ -200,20 +202,28 @@ TOOL CALL FORMAT:
 
 EXAMPLES:
 Task: "Turn on the living room light"
-→ <tool_call>{{"name": "control_device", "arguments": {{"device_name": "living_room_light", "action": "turn_on"}}}}</tool_call>
+→ <tool_call>{{"name": "control_device", "arguments": {{"device_name": "living_room.light", "action": "turn_on"}}}}</tool_call>
 
-Task: "Set thermostat to 72 degrees"
-→ <tool_call>{{"name": "control_device", "arguments": {{"device_name": "living_room_thermostat", "action": "set_temperature", "parameters": {{"temperature": 72}}}}}}</tool_call>
+Task: "Set air conditioner to 24 degrees"
+→ <tool_call>{{"name": "control_device", "arguments": {{"device_name": "master_bedroom.air_conditioner", "action": "set_temperature", "parameters": {{"temperature": 24}}}}}}</tool_call>
+
+Task: "Set curtain to 50% open"
+→ <tool_call>{{"name": "control_device", "arguments": {{"device_name": "master_bedroom.curtain", "action": "set_degree", "parameters": {{"degree": 50}}}}}}</tool_call>
+
+Task: "Set light brightness to 80"
+→ <tool_call>{{"name": "control_device", "arguments": {{"device_name": "living_room.light", "action": "set_brightness", "parameters": {{"brightness": 80}}}}}}</tool_call>
 
 Task: "Turn on all lights"
-→ Multiple <tool_call> blocks, one for each light
+→ Multiple <tool_call> blocks, one for each light device
 
 IMPORTANT RULES:
 1. ALWAYS use tool calls - NEVER just say what you would do
 2. Use control_device for all device operations
-3. Extract device names from the <tools> section
-4. Wrap EVERY tool call in <tool_call></tool_call> tags
-5. Make tool calls immediately - don't just plan"""
+3. Use EXACT device names from the <tools> section (format: room.device)
+4. Use ONLY operations listed in each device's "operations" array
+5. Wrap EVERY tool call in <tool_call></tool_call> tags
+6. Make tool calls immediately - don't just plan
+7. For relative instructions like "increase by X", calculate the absolute value and use set_* operations"""
 
     def _parse_tool_calls(self, response: str):
         """Parse tool calls from LLM response."""

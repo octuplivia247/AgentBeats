@@ -262,6 +262,86 @@ def initialize_smart_home(environment_config: Dict[str, Any]) -> Dict[str, Any]:
 
 @mcp_server.tool
 @register_tool
+def load_home_by_id(home_id: int, jsonl_path: str = "data/home_status_method_all.jsonl") -> Dict[str, Any]:
+    """
+    Load a specific home environment by its ID from a multi-home JSONL file.
+
+    Args:
+        home_id: The home ID to load
+        jsonl_path: Path to the JSONL file containing home configurations
+
+    Returns:
+        Status of initialization with device information
+    """
+    try:
+        logger.info(f"Loading home {home_id} from {jsonl_path}...")
+
+        # Create environment from JSONL with specific home_id
+        environment = SmartHomeEnvironment.from_jsonl(jsonl_path, home_id=home_id)
+        
+        env_id = f"home_{home_id}"
+        state.environments[env_id] = environment
+        state.current_env_id = env_id
+
+        logger.info(f"Home {home_id} loaded with {len(environment.devices)} devices")
+
+        return {
+            "status": "success",
+            "home_id": home_id,
+            "environment_id": env_id,
+            "device_count": len(environment.devices),
+            "devices": list(environment.devices.keys()),
+            "rooms": environment._manager.list_rooms() if environment._manager else [],
+        }
+
+    except Exception as e:
+        logger.error(f"Error loading home {home_id}: {e}")
+        logger.debug(traceback.format_exc())
+        return {
+            "status": "error",
+            "error": str(e),
+            "home_id": home_id,
+        }
+
+
+@mcp_server.tool
+@register_tool
+def list_available_homes(jsonl_path: str = "data/home_status_method_all.jsonl") -> Dict[str, Any]:
+    """
+    List all available home IDs from a multi-home JSONL file.
+
+    Args:
+        jsonl_path: Path to the JSONL file containing home configurations
+
+    Returns:
+        List of available home IDs
+    """
+    try:
+        from src.green_agent.core.manager2 import load_home_from_jsonl
+        
+        homes = load_home_from_jsonl(jsonl_path)
+        home_ids = sorted(homes.keys())
+        
+        logger.info(f"Found {len(home_ids)} homes in {jsonl_path}")
+
+        return {
+            "status": "success",
+            "home_count": len(home_ids),
+            "home_ids": home_ids,
+            "jsonl_path": jsonl_path,
+        }
+
+    except Exception as e:
+        logger.error(f"Error listing homes: {e}")
+        logger.debug(traceback.format_exc())
+        return {
+            "status": "error",
+            "error": str(e),
+        }
+
+
+@mcp_server.tool
+@register_tool
 def assign_task(task: Dict[str, Any]) -> Dict[str, Any]:
     """
     Send a HomeBench task instruction to the purple agent.
@@ -497,8 +577,20 @@ def evaluate_all_categories(results_path: str) -> Dict[str, Dict[str, float]]:
                     category = result_dict.get("category", "normal_single")
                     if category not in results_by_category:
                         results_by_category[category] = []
+
+                    # Handle both predicted_operations (list) and predicted_output (raw string)
+                    predicted = result_dict.get("predicted_operations", [])
+                    if not predicted and result_dict.get("predicted_output"):
+                        # Parse raw predicted_output string to list
+                        raw = result_dict["predicted_output"].strip("'\"")
+                        predicted = [
+                            op.strip()
+                            for op in raw.split(",")
+                            if op.strip() and op.strip() != "error_input"
+                        ]
+
                     results_by_category[category].append({
-                        "predicted": result_dict.get("predicted_operations", []),
+                        "predicted": predicted,
                         "expected": result_dict.get("expected_operations", []),
                     })
 

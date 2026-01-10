@@ -81,6 +81,37 @@ class MCPClient:
             "initialize_smart_home", {"environment_config": environment_config}
         )
 
+    async def load_home_by_id(
+        self, home_id: int, jsonl_path: str = "data/home_status_method_all.jsonl"
+    ) -> Dict[str, Any]:
+        """
+        Load a specific home environment by its ID from a multi-home JSONL file.
+
+        Args:
+            home_id: The home ID to load
+            jsonl_path: Path to the JSONL file containing home configurations
+
+        Returns:
+            Status of initialization with device information
+        """
+        return await self.call_tool(
+            "load_home_by_id", {"home_id": home_id, "jsonl_path": jsonl_path}
+        )
+
+    async def list_available_homes(
+        self, jsonl_path: str = "data/home_status_method_all.jsonl"
+    ) -> Dict[str, Any]:
+        """
+        List all available home IDs from a multi-home JSONL file.
+
+        Args:
+            jsonl_path: Path to the JSONL file containing home configurations
+
+        Returns:
+            List of available home IDs
+        """
+        return await self.call_tool("list_available_homes", {"jsonl_path": jsonl_path})
+
     async def assign_task(self, task: Dict[str, Any]) -> Dict[str, Any]:
         """
         Send a HomeBench task instruction to the purple agent.

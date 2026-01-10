@@ -74,6 +74,8 @@ def load_tasks_from_dataset(
                     "expected_operations": operations,
                     "category": data.get("type", "normal_single"),
                     "home_id": data.get("home_id", 0),
+                    # Placeholder for predicted output (compatible with categorizer)
+                    "predicted_output": data.get("predicted_output"),
                 })
             except json.JSONDecodeError:
                 continue
@@ -115,6 +117,8 @@ def get_task_by_id(
                         "expected_operations": operations,
                         "category": data.get("type", "normal_single"),
                         "home_id": data.get("home_id", 0),
+                        # Placeholder for predicted output (compatible with categorizer)
+                        "predicted_output": data.get("predicted_output"),
                     }
             except json.JSONDecodeError:
                 continue
