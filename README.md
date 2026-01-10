@@ -2,18 +2,19 @@
 
 Multi-agent evaluation framework for testing LLM-based smart home agents using A2A and MCP protocols.
 
-## ⚡ Quick Demo (30 Seconds)
+## Quickstart
 
+### Running Locally
 ```bash
-# 1. Setup
-cp sample.env .env && echo "OPENAI_API_KEY=sk-proj-your-key" >> .env
-
-# 2. Install
-pip install -e ".[dev]"
-
-# 3. Demo
-agentbeats launch
+./run_local.sh
 ```
+
+### Running in Docker
+```bash
+./run_docker.sh
+```
+
+Replace `your-registry/agentbeats-green:v1` with your published Docker image.
 
 ## Architecture
 
@@ -217,3 +218,62 @@ pytest --cov=src test_refactored_architecture.py
 # Or using make
 make test
 ```
+
+## Scoring & Metrics
+
+The green agent evaluates purple agents on smart home tasks using the following metrics:
+
+- **Exact Match**: Binary score for perfect operation sequence matching
+- **Precision**: Ratio of correct operations to total predicted operations
+- **Recall**: Ratio of correct operations to total expected operations
+- **F1 Score**: Harmonic mean of precision and recall
+
+Scoring output is JSON printed to stdout:
+
+```json
+{
+  "task_id": "smarthome_task_1",
+  "exact_match": 0.0,
+  "precision": 0.8,
+  "recall": 0.9,
+  "f1": 0.85,
+  "total_steps": 5
+}
+```
+
+## Baseline Purple Agent(s)
+
+The project includes a baseline purple agent implemented in `src/purple_agent/`. This agent uses MCP tools to interact with the smart home environment.
+
+To run the baseline agent:
+
+```bash
+python main.py purple --host localhost --port 9000 --mcp-url http://localhost:9006
+```
+
+## Troubleshooting
+
+### Common Issues
+
+- **Port conflicts**: Ensure ports 8080, 9000, 9001, 9006 are available
+- **Missing API keys**: Set OPENAI_API_KEY in .env file
+- **Docker build fails**: Ensure Docker has access to the context
+
+### Error Messages
+
+- `Connection refused`: Check if all services are running
+- `Invalid operations`: Purple agent may be sending malformed commands
+
+## Reproducibility
+
+Results are deterministic for the same inputs. The baseline purple agent uses OpenAI GPT models; to ensure reproducibility:
+
+- Set a fixed random seed in the LLM calls (if supported)
+- Use the same API key and model version
+- Run evaluations in sequence, not parallel
+
+Example runs are provided in `examples/` with expected outputs.
+
+## Contact
+
+For questions or issues, please open an issue on GitHub.

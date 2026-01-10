@@ -492,7 +492,7 @@ Please use the available MCP tools to complete this task.
 
 
 def start_green_agent(
-    agent_name="SmartHome_green_agent", host="localhost", port=9001, mcp_url=None
+    agent_name="SmartHome_green_agent", host="localhost", port=8080, mcp_url=None, card_url=None
 ):
     """
     Start the green agent.
@@ -502,6 +502,7 @@ def start_green_agent(
         host: Host to bind the server
         port: Port to bind the server
         mcp_url: Optional MCP server URL. If provided, uses MCP-based executor.
+        card_url: Optional card URL for AgentBeats.
     """
     print("=" * 70)
     print("Starting Green Agent (Evaluation Orchestrator)")

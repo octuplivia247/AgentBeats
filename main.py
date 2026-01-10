@@ -9,9 +9,13 @@ app = typer.Typer(help="Agentified A2A Smart Home Assessment")
 
 
 @app.command()
-def green():
+def green(
+    host: str = typer.Option("localhost", help="Host to bind the server"),
+    port: int = typer.Option(8080, help="Port to bind the server"),
+    card_url: str = typer.Option(None, help="Card URL for AgentBeats")
+):
     """Start the green agent (assessment manager)."""
-    start_green_agent()
+    start_green_agent(host=host, port=port, card_url=card_url)
 
 
 @app.command()
