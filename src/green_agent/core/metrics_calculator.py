@@ -1,5 +1,9 @@
 import re
 from typing import List, Dict, Set, Any, Optional, TYPE_CHECKING
+from typing import List, Dict, Set, Any, Optional
+import json
+from dataclasses import dataclass
+
 
 if TYPE_CHECKING:
     from src.green_agent.core.models.task_result import TaskResult
@@ -217,7 +221,7 @@ class MetricsCalculator:
     def compute(cls, predicted: List[str], expected: List[str]) -> Dict[str, float]:
         """Class method to compute metrics without instantiation."""
         return cls().compute_metrics(predicted, expected)
-    
+
     def compute_aggregate_metrics(
         self,
         task_results: List["TaskResult"]
@@ -322,4 +326,256 @@ class MetricsCalculator:
                 'avg_f1': aggregate['avg_f1']
             }
         }
-    
+
+class HomeBenchMetricsCalculator(MetricsCalculator):
+    """
+    Extends MetricsCalculator to handle HomeBench format data
+    Adds parsing logic for the triple-quote format
+    """
+
+    @staticmethod
+    def parse_homebench_output(output: str) -> List[str]:
+        """
+        Parse HomeBench format output into list of operations
+
+        Input format: "''' operation1,operation2,'''"
+        Output: ["operation1", "operation2"]
+
+        Args:
+            output: Raw output string from agent or expected
+
+        Returns:
+            List of individual operation strings
+        """
+        # Remove triple quotes and whitespace
+        output = output.replace("'''", "").replace(" ", "").replace("\n", "")
+
+        # Split by comma and filter empty strings
+        operations = output.split(",")
+        operations = [op for op in operations if op != ""]
+
+        return operations
+
+    def evaluate_task(self, task_data: Dict[str, Any]) -> Dict[str, float]:
+        """
+        Evaluate a single task in HomeBench format
+
+        Args:
+            task_data: Dict with keys:
+                - 'id': task identifier
+                - 'expected_output': ground truth output
+                - 'predicted_output': agent's output
+
+        Returns:
+            Dictionary with metrics:
+                - 'exact_match': 1.0 if perfect match, 0.0 otherwise
+                - 'precision': precision score
+                - 'recall': recall score
+                - 'f1': F1 score
+        """
+        expected = self.parse_homebench_output(task_data['expected_output'])
+        predicted = self.parse_homebench_output(task_data['predicted_output'])
+
+        return self.compute_metrics(predicted, expected)
+
+
+    def evaluate_batch(self, tasks: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Evaluate multiple tasks and return aggregate metrics
+
+        Args:
+            tasks: List of task dicts with format:
+                {
+                    'id': task_id,
+                    'agent_id': agent_id,
+                    'unique_id': unique_id,
+                    'expected_output': "...",
+                    'predicted_output': "..."
+                }
+
+        Returns:
+            Dictionary with:
+                - 'aggregate': Overall metrics (EM, Precision, Recall, F1)
+                - 'by_category': Metrics broken down by task type
+                - 'per_task': Individual task results, with agent_id and unique_id first
+        """
+        # Convert to TaskResult format for aggregate computation
+        task_results = []
+        for task in tasks:
+            expected = self.parse_homebench_output(task['expected_output'])
+            predicted = self.parse_homebench_output(task['predicted_output'])
+
+            task_results.append(TaskResult(
+                task_id=task['id'],
+                predicted_operations=predicted,
+                expected_operations=expected,
+                additional_info={
+                    'type': task.get('type'),
+                    'agent_id': task.get('agent_id', 'agent_dummy'),
+                    'unique_id': task.get('unique_id', 247)
+                }
+            ))
+
+        # Compute aggregate metrics
+        aggregate = self.compute_aggregate_metrics(task_results)
+
+        # Compute per-category metrics
+        by_category = self._compute_category_metrics(task_results)
+
+        # Compute per-task metrics, with agent_id and unique_id first
+        per_task = []
+        for task_result in task_results:
+            metrics = self.compute_metrics(
+                task_result.predicted_operations,
+                task_result.expected_operations
+            )
+            per_task.append({
+                'agent_id': task_result.additional_info.get('agent_id'),
+                'unique_id': task_result.additional_info.get('unique_id'),
+                **metrics,
+                'task_id': task_result.task_id,
+                'type': task_result.additional_info.get('type'),
+                'predicted_count': len(task_result.predicted_operations),
+                'expected_count': len(task_result.expected_operations)
+            })
+
+        return {
+            'aggregate': aggregate,
+            'by_category': by_category,
+            'per_task': per_task
+        }
+
+
+    def _compute_category_metrics(
+        self,
+        task_results: List[TaskResult]
+    ) -> Dict[str, Dict[str, float]]:
+        """
+        Compute metrics grouped by task category
+
+        Categories: normal, unexist_device, unexist_attribute,
+                   multi_normal, multi_mix, multi_error
+        """
+        # Group tasks by category
+        categories = {}
+        for result in task_results:
+            task_type = result.additional_info.get('type', 'unknown')
+            if task_type not in categories:
+                categories[task_type] = []
+            categories[task_type].append(result)
+
+        # Compute metrics for each category
+        category_metrics = {}
+        for cat_name, cat_tasks in categories.items():
+            category_metrics[cat_name] = self.compute_aggregate_metrics(cat_tasks)
+
+        return category_metrics
+
+
+def evaluate_agent_output(tasks_with_predictions: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Main function to call after purple agent outputs data
+
+    Args:
+        tasks_with_predictions: List of task dicts with both expected and predicted outputs
+
+    Returns:
+        Complete evaluation results with aggregate, per-category, and per-task metrics
+    """
+    calculator = HomeBenchMetricsCalculator()
+    return calculator.evaluate_batch(tasks_with_predictions)
+
+
+def final_evaluator_results(output_purple_agent):
+    results = evaluate_agent_output(output_purple_agent)
+
+    # Extract agent info from the first task (assuming all tasks are from the same agent)
+    first_task = output_purple_agent[0]
+    agent_id = first_task.get('agent_id', 'agent_dummy')
+    unique_id = first_task.get('unique_id', 247)
+
+    # Wrap aggregate metrics in the desired structure
+    final_results = {
+        "agent_id": agent_id,
+        "unique_id": unique_id,
+        "agent_evaluation_score": results['aggregate']
+    }
+
+    # Print results
+    print("\n" + "="*80)
+    print("EVALUATION RESULTS")
+    print("="*80)
+
+    agg = results['aggregate']
+    print(f"\nOverall Performance:")
+    print(f"  Exact Match (Accuracy): {agg['avg_exact_match']:.2%}")
+    print(f"  Precision:              {agg['avg_precision']:.2%}")
+    print(f"  Recall:                 {agg['avg_recall']:.2%}")
+    print(f"  F1 Score:               {agg['avg_f1']:.2%}")
+    print(f"  Perfect Tasks:          {agg['perfect_tasks']}/{agg['total_tasks']}")
+
+    # Save to JSON file in the desired format
+    with open('evaluation_results.json', 'w') as f:
+        json.dump(final_results, f, indent=2)
+
+    print(f"\nFinal results saved to: evaluation_results.json")
+
+
+
+
+
+
+
+####################
+
+import json
+from typing import List, Dict, Any
+
+# import your evaluator
+# make sure this import path is correct
+# from evaluator import final_evaluator_results
+# or if same file, you can skip this import
+
+def load_jsonl(path: str) -> List[Dict[str, Any]]:
+    """Load a JSONL file into a list of dicts"""
+    data = []
+    with open(path, "r") as f:
+        for line_num, line in enumerate(f, 1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                data.append(json.loads(line))
+            except json.JSONDecodeError as e:
+                raise ValueError(f"JSON error on line {line_num}: {e}")
+    return data
+
+
+def prepare_tasks(tasks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Ensure each task has a predicted_output field.
+    If missing, set it to error_input (common HomeBench baseline).
+    """
+    prepared = []
+    for t in tasks:
+        task = dict(t)  # shallow copy
+
+        if "predicted_output" not in task:
+            # baseline / placeholder prediction
+            task["predicted_output"] = "'''error_input'''"
+
+        prepared.append(task)
+
+    return prepared
+
+#for testing purposes
+# if __name__ == "__main__":
+
+#     with open("subset_20_homebench_4-3-1-1-1.jsonl") as f:
+#         tasks = [json.loads(line) for line in f if line.strip()]
+
+#     for t in tasks:
+#         if "predicted_output" not in t:
+#             t["predicted_output"] = "'''error_input'''"
+
+#     final_evaluator_results(tasks)
