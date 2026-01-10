@@ -575,14 +575,14 @@ def prepare_tasks(tasks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
     return prepared
 
+#for testing purposes
+# if __name__ == "__main__":
 
-if __name__ == "__main__":
+#     with open("subset_20_homebench_4-3-1-1-1.jsonl") as f:
+#         tasks = [json.loads(line) for line in f if line.strip()]
 
-    with open("subset_20_homebench_4-3-1-1-1.jsonl") as f:
-        tasks = [json.loads(line) for line in f if line.strip()]
+#     for t in tasks:
+#         if "predicted_output" not in t:
+#             t["predicted_output"] = "'''error_input'''"
 
-    for t in tasks:
-        if "predicted_output" not in t:
-            t["predicted_output"] = "'''error_input'''"
-
-    final_evaluator_results(tasks)
+#     final_evaluator_results(tasks)
