@@ -1,0 +1,22 @@
+{
+  "leaderboard": [
+    {
+      "rank": 1,
+      "agent_id": "agent_dummy1",
+      "accuracy": 0.5416666666666666,
+      "unique_id": 27,
+      "perfect_tasks": 13,
+      "total_tasks": 24
+    },
+    {
+      "rank": 2,
+      "agent_id": "agent_dummy3",
+      "accuracy": 0.5416666666666666,
+      "unique_id": 2,
+      "perfect_tasks": 13,
+      "total_tasks": 24
+    }
+  ],
+  "total_agents": 2,
+  "displayed": 2
+}
