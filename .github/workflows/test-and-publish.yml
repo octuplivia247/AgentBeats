@@ -34,7 +34,7 @@ jobs:
       - name: Build Docker image
         uses: docker/build-push-action@v5
         with:
-          context: ./submission/green-agent
+          context: ./green-agent
           push: false
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -81,11 +81,11 @@ jobs:
         uses: astral-sh/setup-uv@v4
 
       - name: Install test dependencies
-        working-directory: ./submission/green-agent
+        working-directory: ./green-agent
         run: uv sync --extra test
 
       - name: Run tests
-        working-directory: ./submission/green-agent
+        working-directory: ./green-agent
         run: uv run pytest -v --agent-url http://localhost:9009
 
       - name: Stop container and show logs
