@@ -120,9 +120,9 @@ class Agent:
         await self.mcp.close()
 
     def _load_tasks(self, config: dict[str, Any]) -> list[dict]:
-        if path := config.get("dataset_path"):
-            if Path(path).exists():
-                return self._load_from_file(path, config.get("task_ids"))
+        path = config.get("dataset_path", "data/test_data.jsonl")
+        if Path(path).exists():
+            return self._load_from_file(path, config.get("task_ids"))
         if "tasks" in config:
             return config["tasks"]
         return [
