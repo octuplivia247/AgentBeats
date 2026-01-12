@@ -27,7 +27,7 @@ env/
 ENV/
 env.bak/
 venv.bak/
-
+.venv/
 # IDE
 .vscode/
 .idea/
@@ -67,3 +67,5 @@ logs/
 data/*.jsonl.bak
 data/*.csv
 *.pid
+
+./.idea

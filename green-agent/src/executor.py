@@ -1,0 +1,91 @@
+"""
+A2A Executor for the HomeBench Green Agent.
+
+This module handles incoming A2A requests and manages task lifecycle
+using the TaskUpdater pattern required by the AgentBeats platform.
+"""
+
+from a2a.server.agent_execution import AgentExecutor, RequestContext
+from a2a.server.events import EventQueue
+from a2a.server.tasks import TaskUpdater
+from a2a.types import (
+    Task,
+    TaskState,
+    UnsupportedOperationError,
+    InvalidRequestError,
+)
+from a2a.utils.errors import ServerError
+from a2a.utils import (
+    new_agent_text_message,
+    new_task,
+)
+
+from agent import Agent
+
+
+TERMINAL_STATES = {
+    TaskState.completed,
+    TaskState.canceled,
+    TaskState.failed,
+    TaskState.rejected
+}
+
+
+class Executor(AgentExecutor):
+    """
+    A2A executor that wraps the HomeBench agent.
+    
+    Manages context-to-agent mapping and task lifecycle,
+    ensuring proper status updates via TaskUpdater.
+    """
+
+    def __init__(self):
+        self.agents: dict[str, Agent] = {}  # context_id -> agent instance
+
+    async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
+        """Execute an evaluation request."""
+        msg = context.message
+        if not msg:
+            raise ServerError(error=InvalidRequestError(message="Missing message in request"))
+
+        task = context.current_task
+        if task and task.status.state in TERMINAL_STATES:
+            raise ServerError(
+                error=InvalidRequestError(
+                    message=f"Task {task.id} already processed (state: {task.status.state})"
+                )
+            )
+
+        if not task:
+            task = new_task(msg)
+            await event_queue.enqueue_event(task)
+
+        context_id = task.context_id
+        agent = self.agents.get(context_id)
+        if not agent:
+            agent = Agent()
+            self.agents[context_id] = agent
+
+        updater = TaskUpdater(event_queue, task.id, context_id)
+
+        await updater.start_work()
+        try:
+            await agent.run(msg, updater)
+            if not updater._terminal_state_reached:
+                await updater.complete()
+        except Exception as e:
+            print(f"Task failed with agent error: {e}")
+            import traceback
+            traceback.print_exc()
+            await updater.failed(
+                new_agent_text_message(
+                    f"Agent error: {e}",
+                    context_id=context_id,
+                    task_id=task.id
+                )
+            )
+
+    async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
+        """Cancel is not supported for evaluation tasks."""
+        raise ServerError(error=UnsupportedOperationError())
+
