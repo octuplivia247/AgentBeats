@@ -1,4 +1,4 @@
-name: Test and Publish Agent
+name: Test and Publish Green Agent
 
 on:
   pull_request:
@@ -6,15 +6,12 @@ on:
     branches:
       - main
     tags:
-      - 'v*'  # Trigger on version tags like v1.0.0, v1.1.0
+      - 'v*'
 
 jobs:
   test-and-publish:
     runs-on: ubuntu-latest
 
-    # These permissions are required for the workflow to:
-    # - Read repository contents (checkout code)
-    # - Write to GitHub Container Registry (push Docker images)
     permissions:
       contents: read
       packages: write
@@ -37,7 +34,7 @@ jobs:
       - name: Build Docker image
         uses: docker/build-push-action@v5
         with:
-          context: .
+          context: ./submission/green-agent
           push: false
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -46,19 +43,49 @@ jobs:
 
       - name: Start agent container
         env:
-            SECRETS_JSON: ${{ toJson(secrets) }}
+          SECRETS_JSON: ${{ toJson(secrets) }}
         run: |
           echo "$SECRETS_JSON" | jq -r 'to_entries[] | "\(.key)=\(.value)"' > .env
-          docker run -d -p 9009:9009 --name agent-container --env-file .env $(echo "${{ steps.meta.outputs.tags }}" | head -n1) --host 0.0.0.0 --port 9009
+          docker run -d \
+            -p 9009:9009 \
+            -p 9006:9006 \
+            --name agent-container \
+            --env-file .env \
+            $(echo "${{ steps.meta.outputs.tags }}" | head -n1) \
+            --host 0.0.0.0 --port 9009 --mcp-host 0.0.0.0 --mcp-port 9006
+          
+          # Wait for A2A server
+          echo "Waiting for A2A server..."
           timeout 30 bash -c 'until curl -sf http://localhost:9009/.well-known/agent-card.json > /dev/null; do sleep 1; done'
+          
+          # Wait for MCP server
+          echo "Waiting for MCP server..."
+          timeout 30 bash -c 'until curl -sf http://localhost:9006/health > /dev/null; do sleep 1; done'
+          
+          echo "Both servers are ready!"
+
+      - name: Verify MCP tools
+        run: |
+          echo "=== MCP Health ==="
+          curl -s http://localhost:9006/health | jq .
+          
+          echo "=== MCP Tools ==="
+          curl -s http://localhost:9006/tools | jq '.tools | length' | xargs -I{} echo "{} tools available"
+          
+          echo "=== Test Compute Metrics ==="
+          curl -s -X POST http://localhost:9006/tools/call \
+            -H "Content-Type: application/json" \
+            -d '{"name": "compute_accuracy_metrics", "arguments": {"predictions": ["test.op()"], "expected": ["test.op()"]}}' | jq .
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v4
 
       - name: Install test dependencies
+        working-directory: ./submission/green-agent
         run: uv sync --extra test
 
       - name: Run tests
+        working-directory: ./submission/green-agent
         run: uv run pytest -v --agent-url http://localhost:9009
 
       - name: Stop container and show logs
@@ -85,5 +112,9 @@ jobs:
         run: |
           echo "## Docker Image Published :rocket:" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Image:** ghcr.io/${GITHUB_REPOSITORY,,}" >> $GITHUB_STEP_SUMMARY
           echo "**Tags:** ${{ steps.meta.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
-
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Ports" >> $GITHUB_STEP_SUMMARY
+          echo "- A2A Server: 9009" >> $GITHUB_STEP_SUMMARY
+          echo "- MCP Server: 9006" >> $GITHUB_STEP_SUMMARY
