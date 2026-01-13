@@ -63,6 +63,43 @@ The Green Agent is an **evaluator** in the HomeBench benchmark system. It:
     │  operations         │
     └─────────────────────┘
 ```
+## Project Structure
+
+```
+green-agent/
+├── src/
+│   ├── server.py           # Entry point - starts A2A + MCP servers
+│   ├── executor.py         # A2A request handler
+│   ├── agent.py            # Core evaluation logic
+│   ├── messenger.py        # A2A client for purple agents
+│   ├── mcp_server.py       # MCP HTTP server with tools
+│   ├── mcp_client.py       # MCP client
+│   ├── metrics_calculator.py # Metric computation
+│   └── models.py           # Pydantic models
+├── tests/
+│   ├── conftest.py         # Pytest fixtures
+│   └── test_agent.py       # A2A conformance tests
+├── Dockerfile
+├── pyproject.toml
+├── uv.lock
+└── README.md
+```
+
+## MCP Tools
+
+The MCP server exposes these tools via HTTP:
+
+| Tool | Description | Arguments |
+|------|-------------|-----------|
+| `compute_accuracy_metrics` | Compute EM, P, R, F1 | `predictions: list[str]`, `expected: list[str]` |
+| `parse_operations_from_response` | Extract operations from text | `response: str` |
+| `compute_batch_metrics` | Aggregate metrics across tasks | `results: list[dict]` |
+| `evaluate_task_completion` | Evaluate single task | `evaluation_input: dict` |
+| `evaluate_homebench_task` | Parse HomeBench triple-quote format | `task_data: dict` |
+| `log_device_action` | Log a device action | `device_name`, `action`, `parameters`, `success`, `error` |
+| `get_action_logs` | Get all logged actions | (none) |
+| `clear_action_logs` | Clear action logs | (none) |
+
 
 # Quick Start
 
@@ -263,43 +300,4 @@ docker logs -f green-agent
 # Stop
 docker stop green-agent && docker rm green-agent
 ```
-
----
-
-## Project Structure
-
-```
-green-agent/
-├── src/
-│   ├── server.py           # Entry point - starts A2A + MCP servers
-│   ├── executor.py         # A2A request handler
-│   ├── agent.py            # Core evaluation logic
-│   ├── messenger.py        # A2A client for purple agents
-│   ├── mcp_server.py       # MCP HTTP server with tools
-│   ├── mcp_client.py       # MCP client
-│   ├── metrics_calculator.py # Metric computation
-│   └── models.py           # Pydantic models
-├── tests/
-│   ├── conftest.py         # Pytest fixtures
-│   └── test_agent.py       # A2A conformance tests
-├── Dockerfile
-├── pyproject.toml
-├── uv.lock
-└── README.md
-```
-
-## MCP Tools
-
-The MCP server exposes these tools via HTTP:
-
-| Tool | Description | Arguments |
-|------|-------------|-----------|
-| `compute_accuracy_metrics` | Compute EM, P, R, F1 | `predictions: list[str]`, `expected: list[str]` |
-| `parse_operations_from_response` | Extract operations from text | `response: str` |
-| `compute_batch_metrics` | Aggregate metrics across tasks | `results: list[dict]` |
-| `evaluate_task_completion` | Evaluate single task | `evaluation_input: dict` |
-| `evaluate_homebench_task` | Parse HomeBench triple-quote format | `task_data: dict` |
-| `log_device_action` | Log a device action | `device_name`, `action`, `parameters`, `success`, `error` |
-| `get_action_logs` | Get all logged actions | (none) |
-| `clear_action_logs` | Clear action logs | (none) |
 
