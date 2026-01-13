@@ -1,13 +1,17 @@
-# HomeBench Green Agent
+# BenchPress Green Agent: A2A Evaluation Framework for Smart Home Agents
 
-An evaluator agent for the [HomeBench](https://github.com/octuplivia247/AgentBeats) smart home benchmark. This agent orchestrates evaluation of "purple" agents (the agents being tested) by sending them smart home tasks and scoring their responses using standardized metrics.
+An evaluator agent for the [HomeBench](https://github.com/octuplivia247/AgentBeats) smart home benchmark. 
+
+The benchmark tests agents on their ability to translate natural language instructions into correct device API calls while also identifying and rejecting invalid or impossible requests. Unlike prior work focusing on straightforward single-device commands, HomeBench includes four challenging categories: valid single-device instructions, valid multi-device instructions, invalid single-device instructions, and invalid multi-device instructions.
+
+The Green Agent orchestrates evaluation of Purple Agents (smart home assistants under test) by distributing tasks from the HomeBench dataset, collecting responses via the A2A protocol, parsing device operations, and computing detailed metrics including Exact Match, Precision, Recall, and F1 scores. 
 
 ## Table of Contents
 
 - [Overview](#overview)
 - [Architecture](#architecture)
 - [Quick Start](#quick-start)
-- [Configuration](#configuration)
+- [Scoring](#scoring)
 - [MCP Tools](#mcp-tools)
 - [API Reference](#api-reference)
 - [Testing](#testing)
@@ -59,41 +63,58 @@ The Green Agent is an **evaluator** in the HomeBench benchmark system. It:
     │  operations         │
     └─────────────────────┘
 ```
+## Project Structure
 
-### Components
+```
+green-agent/
+├── src/
+│   ├── server.py           # Entry point - starts A2A + MCP servers
+│   ├── executor.py         # A2A request handler
+│   ├── agent.py            # Core evaluation logic
+│   ├── messenger.py        # A2A client for purple agents
+│   ├── mcp_server.py       # MCP HTTP server with tools
+│   ├── mcp_client.py       # MCP client
+│   ├── metrics_calculator.py # Metric computation
+│   └── models.py           # Pydantic models
+├── tests/
+│   ├── conftest.py         # Pytest fixtures
+│   └── test_agent.py       # A2A conformance tests
+├── Dockerfile
+├── pyproject.toml
+├── uv.lock
+└── README.md
+```
 
-| Component | File | Description |
-|-----------|------|-------------|
-| **Server** | `src/server.py` | Entry point. Starts both A2A and MCP servers |
-| **Executor** | `src/executor.py` | A2A request handler and task lifecycle manager |
-| **Agent** | `src/agent.py` | Core evaluation logic |
-| **Messenger** | `src/messenger.py` | A2A client for talking to purple agents |
-| **MCP Server** | `src/mcp_server.py` | HTTP API exposing evaluation tools |
-| **MCP Client** | `src/mcp_client.py` | Client for calling MCP tools |
-| **Metrics** | `src/metrics_calculator.py` | EM, Precision, Recall, F1 computation |
-| **Models** | `src/models.py` | Pydantic models for MCP requests/responses |
+## MCP Tools
 
----
+The MCP server exposes these tools via HTTP:
 
-## Quick Start
+| Tool | Description | Arguments |
+|------|-------------|-----------|
+| `compute_accuracy_metrics` | Compute EM, P, R, F1 | `predictions: list[str]`, `expected: list[str]` |
+| `parse_operations_from_response` | Extract operations from text | `response: str` |
+| `compute_batch_metrics` | Aggregate metrics across tasks | `results: list[dict]` |
+| `evaluate_task_completion` | Evaluate single task | `evaluation_input: dict` |
+| `evaluate_homebench_task` | Parse HomeBench triple-quote format | `task_data: dict` |
+| `log_device_action` | Log a device action | `device_name`, `action`, `parameters`, `success`, `error` |
+| `get_action_logs` | Get all logged actions | (none) |
+| `clear_action_logs` | Clear action logs | (none) |
 
-### Prerequisites
+
+# Quick Start
+
+## Prerequisites
 
 - Python 3.13+
 - [uv](https://github.com/astral-sh/uv) package manager
 - Docker (optional, for containerized deployment)
 
-### Local Development
+## Local Development
 
 ```bash
-# Clone and navigate
-cd green-agent
-
-# Install dependencies
-uv sync
-
-# Start the agent (both A2A and MCP servers)
-uv run src/server.py
+cd green-agent  # Clone and navigate
+uv sync  # Install dependencies
+uv run src/server.py  # Start the agent (both A2A and MCP servers)
 
 # The agent is now running:
 # - A2A Server: http://localhost:9009
@@ -115,85 +136,15 @@ curl http://localhost:9006/tools | jq .
 
 ---
 
-## Configuration
+# Scoring
 
-### Command Line Arguments
+| Metric | Description |
+|--------|-------------|
+| **Exact Match (EM)** | 1.0 if predicted operations exactly match expected, else 0.0 |
+| **Precision** | Fraction of predicted operations that are correct |
+| **Recall** | Fraction of expected operations that were predicted |
+| **F1** | Harmonic mean of precision and recall |
 
-```bash
-uv run src/server.py [OPTIONS]
-
-Options:
-  --host        A2A server host (default: 0.0.0.0)
-  --port        A2A server port (default: 9009)
-  --card-url    Override agent card URL
-  --mcp-host    MCP server host (default: 0.0.0.0)
-  --mcp-port    MCP server port (default: 9006)
-  --no-mcp      Disable MCP server
-```
-
-### Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `MCP_SERVER_URL` | `http://localhost:9006` | MCP server URL (auto-set when using `server.py`) |
-
-### Evaluation Request Format
-
-Send this JSON to the A2A server:
-
-```json
-{
-  "participants": {
-    "purple_agent": "http://localhost:8000"
-  },
-  "config": {
-    "dataset_path": "data/tasks.jsonl",
-    "timeout_seconds": 60,
-    "task_ids": [0, 1, 2]
-  }
-}
-```
-
-| Field | Required | Description |
-|-------|----------|-------------|
-| `participants.purple_agent` | Yes | URL of the agent being evaluated |
-| `config.dataset_path` | No | Path to JSONL task file |
-| `config.timeout_seconds` | No | Per-task timeout (default: 60) |
-| `config.task_ids` | No | Specific task indices to run |
-| `config.tasks` | No | Inline task definitions |
-
-### Task Format (JSONL)
-
-Each line in the dataset file should be:
-
-```json
-{
-  "task_id": "task_001",
-  "instruction": "Turn on the living room light",
-  "expected_operations": ["living_room.light.turn_on()"],
-  "category": "valid_single",
-  "home_id": 1
-}
-```
-
----
-
-## MCP Tools
-
-The MCP server exposes these tools via HTTP:
-
-| Tool | Description | Arguments |
-|------|-------------|-----------|
-| `compute_accuracy_metrics` | Compute EM, P, R, F1 | `predictions: list[str]`, `expected: list[str]` |
-| `parse_operations_from_response` | Extract operations from text | `response: str` |
-| `compute_batch_metrics` | Aggregate metrics across tasks | `results: list[dict]` |
-| `evaluate_task_completion` | Evaluate single task | `evaluation_input: dict` |
-| `evaluate_homebench_task` | Parse HomeBench triple-quote format | `task_data: dict` |
-| `log_device_action` | Log a device action | `device_name`, `action`, `parameters`, `success`, `error` |
-| `get_action_logs` | Get all logged actions | (none) |
-| `clear_action_logs` | Clear action logs | (none) |
-
-### Example: Compute Metrics
 
 ```bash
 curl -X POST http://localhost:9006/tools/call \
@@ -220,29 +171,50 @@ Response:
 }
 ```
 
----
+### Example
 
-## API Reference
+```
+Expected:  ["light.on()", "thermostat.set(72)"]
+Predicted: ["light.on()", "fan.off()"]
 
-### A2A Endpoints (Port 9009)
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/.well-known/agent-card.json` | GET | Agent card (capabilities, skills) |
-| `/` | POST | Send evaluation request |
-
-### MCP Endpoints (Port 9006)
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/` | GET | Server info and tool list |
-| `/health` | GET | Health check |
-| `/tools` | GET | List all tools with descriptions |
-| `/tools/call` | POST | Call a tool |
-
----
+EM = 0.0 (not exact match)
+Precision = 1/2 = 0.5 (1 correct out of 2 predicted)
+Recall = 1/2 = 0.5 (1 correct out of 2 expected)
+F1 = 0.5
+```
 
 ## Testing
+
+### Push to Docker Hub
+
+```bash
+docker login
+docker tag homebench-green-agent YOUR_USERNAME/green-agent:latest
+docker push YOUR_USERNAME/green-agent:latest
+```
+
+---
+
+## CI/CD
+
+The GitHub Actions workflow (`.github/workflows/test-and-publish.yml`) automatically:
+
+1. **On every PR**: Builds, starts, and tests the agent
+2. **On push to main**: Tests + publishes to GitHub Container Registry
+3. **On version tags (`v*`)**: Tests + publishes with version tags
+
+### Required Secrets
+
+| Secret | Required | Description |
+|--------|----------|-------------|
+| `GITHUB_TOKEN` | Auto | Provided by GitHub Actions |
+| `OPENAI_API_KEY` | Only if testing with real purple agents | Passed to container |
+
+### Pull the Published Image
+
+```bash
+docker pull ghcr.io/octuplivia247/agentbeats:latest
+```
 
 ### Run Tests Locally
 
@@ -289,6 +261,14 @@ docker stop green-agent && docker rm green-agent
 
 ### Build
 
+Install and configure buildx:
+
+```bash
+brew install docker-buildx
+mkdir -p ~/.docker/cli-plugins
+ln -sfn $(brew --prefix)/opt/docker-buildx/bin/docker-buildx ~/.docker/cli-plugins/docker-buildx
+```
+
 ```bash
 # Requires BuildKit (for cache mounts)
 docker buildx build -t homebench-green-agent .
@@ -321,115 +301,3 @@ docker logs -f green-agent
 docker stop green-agent && docker rm green-agent
 ```
 
-### Push to Docker Hub
-
-```bash
-docker login
-docker tag homebench-green-agent YOUR_USERNAME/green-agent:latest
-docker push YOUR_USERNAME/green-agent:latest
-```
-
----
-
-## CI/CD
-
-The GitHub Actions workflow (`.github/workflows/test-and-publish.yml`) automatically:
-
-1. **On every PR**: Builds, starts, and tests the agent
-2. **On push to main**: Tests + publishes to GitHub Container Registry
-3. **On version tags (`v*`)**: Tests + publishes with version tags
-
-### Required Secrets
-
-| Secret | Required | Description |
-|--------|----------|-------------|
-| `GITHUB_TOKEN` | Auto | Provided by GitHub Actions |
-| `OPENAI_API_KEY` | Only if testing with real purple agents | Passed to container |
-
-### Pull the Published Image
-
-```bash
-docker pull ghcr.io/octuplivia247/agentbeats:latest
-```
-
----
-
-## Project Structure
-
-```
-green-agent/
-├── src/
-│   ├── server.py           # Entry point - starts A2A + MCP servers
-│   ├── executor.py         # A2A request handler
-│   ├── agent.py            # Core evaluation logic
-│   ├── messenger.py        # A2A client for purple agents
-│   ├── mcp_server.py       # MCP HTTP server with tools
-│   ├── mcp_client.py       # MCP client
-│   ├── metrics_calculator.py # Metric computation
-│   └── models.py           # Pydantic models
-├── tests/
-│   ├── conftest.py         # Pytest fixtures
-│   └── test_agent.py       # A2A conformance tests
-├── Dockerfile
-├── pyproject.toml
-├── uv.lock
-└── README.md
-```
-
----
-
-## Metrics Explained
-
-| Metric | Description |
-|--------|-------------|
-| **Exact Match (EM)** | 1.0 if predicted operations exactly match expected, else 0.0 |
-| **Precision** | Fraction of predicted operations that are correct |
-| **Recall** | Fraction of expected operations that were predicted |
-| **F1** | Harmonic mean of precision and recall |
-
-### Example
-
-```
-Expected:  ["light.on()", "thermostat.set(72)"]
-Predicted: ["light.on()", "fan.off()"]
-
-EM = 0.0 (not exact match)
-Precision = 1/2 = 0.5 (1 correct out of 2 predicted)
-Recall = 1/2 = 0.5 (1 correct out of 2 expected)
-F1 = 0.5
-```
-
----
-
-## Troubleshooting
-
-### "BuildKit is missing"
-
-Install and configure buildx:
-
-```bash
-brew install docker-buildx
-mkdir -p ~/.docker/cli-plugins
-ln -sfn $(brew --prefix)/opt/docker-buildx/bin/docker-buildx ~/.docker/cli-plugins/docker-buildx
-```
-
-### "Agent not responding"
-
-Check both servers are running:
-
-```bash
-curl http://localhost:9009/.well-known/agent-card.json
-curl http://localhost:9006/health
-```
-
-### Container logs
-
-```bash
-docker logs green-agent
-```
-
----
-
-## License
-
-See the main [AgentBeats](https://github.com/octuplivia247/AgentBeats) repository for license information.
