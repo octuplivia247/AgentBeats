@@ -11,7 +11,7 @@ The Green Agent orchestrates evaluation of Purple Agents (smart home assistants 
 - [Overview](#overview)
 - [Architecture](#architecture)
 - [Quick Start](#quick-start)
-- [Configuration](#configuration)
+- [Scoring](#scoring)
 - [MCP Tools](#mcp-tools)
 - [API Reference](#api-reference)
 - [Testing](#testing)
@@ -99,16 +99,6 @@ curl http://localhost:9006/tools | jq .
 
 ---
 
-## Configuration
-
-### Command Line Arguments
-
-```bash
-uv run src/server.py [OPTIONS]
-```
-
----
-
 # Scoring
 
 | Metric | Description |
@@ -158,6 +148,37 @@ F1 = 0.5
 
 ## Testing
 
+### Push to Docker Hub
+
+```bash
+docker login
+docker tag homebench-green-agent YOUR_USERNAME/green-agent:latest
+docker push YOUR_USERNAME/green-agent:latest
+```
+
+---
+
+## CI/CD
+
+The GitHub Actions workflow (`.github/workflows/test-and-publish.yml`) automatically:
+
+1. **On every PR**: Builds, starts, and tests the agent
+2. **On push to main**: Tests + publishes to GitHub Container Registry
+3. **On version tags (`v*`)**: Tests + publishes with version tags
+
+### Required Secrets
+
+| Secret | Required | Description |
+|--------|----------|-------------|
+| `GITHUB_TOKEN` | Auto | Provided by GitHub Actions |
+| `OPENAI_API_KEY` | Only if testing with real purple agents | Passed to container |
+
+### Pull the Published Image
+
+```bash
+docker pull ghcr.io/octuplivia247/agentbeats:latest
+```
+
 ### Run Tests Locally
 
 The tests require a running agent:
@@ -202,6 +223,14 @@ docker stop green-agent && docker rm green-agent
 ## Docker
 
 ### Build
+
+Install and configure buildx:
+
+```bash
+brew install docker-buildx
+mkdir -p ~/.docker/cli-plugins
+ln -sfn $(brew --prefix)/opt/docker-buildx/bin/docker-buildx ~/.docker/cli-plugins/docker-buildx
+```
 
 ```bash
 # Requires BuildKit (for cache mounts)
@@ -274,15 +303,3 @@ The MCP server exposes these tools via HTTP:
 | `get_action_logs` | Get all logged actions | (none) |
 | `clear_action_logs` | Clear action logs | (none) |
 
-
-### Container logs
-
-```bash
-docker logs green-agent
-```
-
----
-
-## License
-
-See the main [AgentBeats](https://github.com/octuplivia247/AgentBeats) repository for license information.
