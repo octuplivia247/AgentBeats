@@ -181,8 +181,8 @@ Only respond with operations inside square brackets."""
         # Filter out common template patterns
         template_patterns = {
             "device.method(args)",
-            "example.operation(value)",
-            "namespace.device.method()",
+            "example.operation(args)",
+            "namespace.device.operation(args)",
         }
         
         filtered = [op for op in operations if op not in template_patterns]
