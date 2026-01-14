@@ -161,7 +161,7 @@ class Agent:
             return TaskResult(task_id=task_id, success=False, score=0.0, predicted_operations=[], expected_operations=expected, error=str(e), category=category)
 
     def _format_message(self, task: dict) -> str:
-    return f"""You are a smart home assistant. Execute the following instruction:
+        return f"""You are a smart home assistant. Execute the following instruction:
 Instruction: {task.get("instruction", "")}
 Task ID: {task.get("task_id", "")}
 Home ID: {task.get("home_id", 0)}
