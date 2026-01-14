@@ -165,9 +165,9 @@ class Agent:
 Instruction: {task.get("instruction", "")}
 Task ID: {task.get("task_id", "")}
 Home ID: {task.get("home_id", 0)}
-Respond with device operations formatted as: namespace.device.operation(args)
-Example: [living_room.light.turn_on()]
-Only respond with operations inside square brackets."""
+Respond ONLY with a JSON list of operations, no other text. Example format:
+["living_room.light.turn_on()", "bedroom.thermostat.set_temperature(72)"]
+"""
 
     async def _parse_ops(self, response: str) -> list[str]:
         if await self._mcp_available():
@@ -175,16 +175,21 @@ Only respond with operations inside square brackets."""
                 return await self.mcp.parse_operations_from_response(response)
             except Exception:
                 pass
-        
-        operations = re.findall(r'[\w_]+(?:\.[\w_]+)+\([^)]*\)', response)
-        
-        # Filter out common template patterns
+                
         template_patterns = {
             "device.method(args)",
             "example.operation(args)",
             "namespace.device.operation(args)",
         }
+        operations = []
+        # Try to parse as JSON first
+        try:
+            operations = json.loads(response)
+        except json.JSONDecodeError:
+            # Fallback to regex
+            operations = re.findall(r'[\w_]+(?:\.[\w_]+)+\([^)]*\)', response)
         
+        # Filter out common template patterns
         filtered = [op for op in operations if op not in template_patterns]
         return filtered if filtered else operations
 
