@@ -56,11 +56,11 @@ jobs:
           
           # Wait for A2A server
           echo "Waiting for A2A server..."
-          timeout 30 bash -c 'until curl -sf http://localhost:9009/.well-known/agent-card.json > /dev/null; do sleep 1; done'
+          timeout 60 bash -c 'until curl -sf http://localhost:9009/.well-known/agent-card.json > /dev/null; do sleep 1; done'
           
           # Wait for MCP server
           echo "Waiting for MCP server..."
-          timeout 30 bash -c 'until curl -sf http://localhost:9006/health > /dev/null; do sleep 1; done'
+          timeout 60 bash -c 'until curl -sf http://localhost:9006/health > /dev/null; do sleep 1; done'
           
           echo "Both servers are ready!"
 
