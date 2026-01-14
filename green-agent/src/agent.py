@@ -169,14 +169,24 @@ Respond with device operations formatted as: namespace.device.operation(args)
 Example: [living_room.light.turn_on()]
 Only respond with operations inside square brackets."""
 
-
     async def _parse_ops(self, response: str) -> list[str]:
         if await self._mcp_available():
             try:
                 return await self.mcp.parse_operations_from_response(response)
             except Exception:
                 pass
-        return re.findall(r'[\w_]+(?:\.[\w_]+)+\([^)]*\)', response)
+        
+        operations = re.findall(r'[\w_]+(?:\.[\w_]+)+\([^)]*\)', response)
+        
+        # Filter out common template patterns
+        template_patterns = {
+            "device.method(args)",
+            "example.operation(value)",
+            "namespace.device.method()",
+        }
+        
+        filtered = [op for op in operations if op not in template_patterns]
+        return filtered if filtered else operations
 
     def _compute_score(self, predicted: list[str], expected: list[str]) -> tuple[bool, float]:
         if not expected:
