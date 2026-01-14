@@ -161,15 +161,14 @@ class Agent:
             return TaskResult(task_id=task_id, success=False, score=0.0, predicted_operations=[], expected_operations=expected, error=str(e), category=category)
 
     def _format_message(self, task: dict) -> str:
-        return f"""You are a smart home assistant. Execute the following instruction:
-
+    return f"""You are a smart home assistant. Execute the following instruction:
 Instruction: {task.get("instruction", "")}
 Task ID: {task.get("task_id", "")}
 Home ID: {task.get("home_id", 0)}
+Respond with device operations formatted as: namespace.device.operation(args)
+Example: [living_room.light.turn_on()]
+Only respond with operations inside square brackets."""
 
-Respond with device operations formatted as: device.method(args)
-Example: living_room.light.turn_on()
-"""
 
     async def _parse_ops(self, response: str) -> list[str]:
         if await self._mcp_available():
