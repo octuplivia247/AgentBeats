@@ -161,7 +161,7 @@ class Messenger:
         for attempt in range(timeout):
             try:
                 async with httpx.AsyncClient(timeout=2) as client:
-                    response = await client.get(f"{url}/.well-known/agent-card.json")
+                    response = await client.get(f"{url.rstrip('/')}/.well-known/agent-card.json")
                     if response.status_code == 200:
                         return True
             except Exception:
