@@ -1,3 +1,8 @@
+{"id": "home0_one_001", "input": "Turn on the living room light.", "output": "'''living_room.light.turn_on()'''", "home_id": 0, "type": "normal"}
+{"id": "home0_one_002", "input": "Turn on the master bedroom light.", "output": "'''master_bedroom.light.turn_on()'''", "home_id": 0, "type": "normal"}
+{"id": "home0_one_003", "input": "Turn on the study room light.", "output": "'''study_room.light.turn_on()'''", "home_id": 0, "type": "normal"}
+{"id": "home0_one_004", "input": "Turn on the kitchen light.", "output": "'''kitchen.light.turn_on()'''", "home_id": 0, "type": "normal"}
+{"id": "home0_one_005", "input": "Turn on the bathroom light.", "output": "'''bathroom.light.turn_on()'''", "home_id": 0, "type": "normal"}
 {"id": "home83_one_132", "input": "Lower the heating temperature in the guest bedroom by 63 degrees.", "output": "''' guest_bedroom.heating.set_temperature(20)'''", "home_id": 83, "type": "normal"}
 {"id": "home73_one_397", "input": "Set the intensity of the humidifier in the study room to 80.", "output": "''' study_room.humidifier.set_intensity(80)'''", "home_id": 73, "type": "normal"}
 {"id": "home53_one_243", "input": "Set the intensity of the dehumidifier to 30 in the guest bedroom.", "output": "''' guest_bedroom.dehumidifiers.set_intensity(30)'''", "home_id": 53, "type": "normal"}
