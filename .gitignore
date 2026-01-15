@@ -99,3 +99,5 @@ data/*.jsonl.bak
 data/*.full.jsonl
 data/*.csv
 *.pid
+
+*.md
