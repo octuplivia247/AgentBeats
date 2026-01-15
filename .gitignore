@@ -28,6 +28,11 @@ ENV/
 env.bak/
 venv.bak/
 .venv/
+.uv/
+
+# UV Package Manager
+.uv_cache/
+
 # IDE
 .vscode/
 .idea/
@@ -35,11 +40,19 @@ venv.bak/
 *.swo
 *~
 .DS_Store
+.claude/
+*.code-workspace
+
+# OS Specific
+Thumbs.db
+Desktop.ini
 
 # Environment variables
 .env
 .env.local
 .env.*.local
+.env.production
+.env.development
 
 # Testing
 .pytest_cache/
@@ -47,11 +60,15 @@ venv.bak/
 htmlcov/
 .tox/
 .hypothesis/
+test-results/
+coverage.xml
+*.cover
 
 # Logs
 *.log
 logs/
 *.pid
+*.out
 
 # Database
 *.db
@@ -63,9 +80,21 @@ logs/
 *.temp
 .cache/
 
+# Docker
+.dockerignore.local
+docker-compose.override.yml
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# Evaluation Results
+results/
+evaluation_results/
+outputs/
+artifacts/
+
 # Project specific
 data/*.jsonl.bak
 data/*.csv
 *.pid
-
-./.idea

@@ -261,6 +261,8 @@ docker stop green-agent && docker rm green-agent
 
 ### Build
 
+**Important**: Build from the parent directory (AgentBeats/) to include the data files.
+
 Install and configure buildx:
 
 ```bash
@@ -270,11 +272,12 @@ ln -sfn $(brew --prefix)/opt/docker-buildx/bin/docker-buildx ~/.docker/cli-plugi
 ```
 
 ```bash
-# Requires BuildKit (for cache mounts)
-docker buildx build -t homebench-green-agent .
+# Build from parent directory (includes data/)
+cd ..  # Go to AgentBeats/
+docker buildx build -f green-agent/Dockerfile -t homebench-green-agent .
 
 # Or with DOCKER_BUILDKIT
-DOCKER_BUILDKIT=1 docker build -t homebench-green-agent .
+DOCKER_BUILDKIT=1 docker build -f green-agent/Dockerfile -t homebench-green-agent .
 ```
 
 ### Run

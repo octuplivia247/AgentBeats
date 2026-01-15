@@ -18,6 +18,7 @@ from a2a.utils import get_message_text, new_agent_text_message
 
 from messenger import Messenger
 from mcp_client import MCPClient
+from metrics_calculator import HomeBenchMetricsCalculator
 
 load_dotenv()
 
@@ -125,21 +126,50 @@ class Agent:
         path = config.get("dataset_path", "data/test_data.jsonl")
         reduced_tests = config.get("reduced_tests", False)
         max_tasks = config.get("max_tasks", 50 if reduced_tests else None)
-        
-        if Path(path).exists():
-            return self._load_from_file(path, config.get("task_ids"), reduced_tests, max_tasks)
+
+        # Try multiple path resolutions for different deployment scenarios
+        resolved_path = self._resolve_data_path(path)
+
+        if resolved_path and Path(resolved_path).exists():
+            return self._load_from_file(resolved_path, config.get("task_ids"), reduced_tests, max_tasks)
         if "tasks" in config:
             return config["tasks"]
+
+        # Fallback to demo tasks for testing
+        logger.warning(f"Dataset file not found: {path}. Using demo tasks.")
         return [
             {"task_id": "demo_1", "instruction": "Turn on the living room light", "expected_operations": ["living_room.light.turn_on()"], "category": "valid_single"},
             {"task_id": "demo_2", "instruction": "Set the bedroom thermostat to 72 degrees", "expected_operations": ["bedroom.thermostat.set_temperature(72)"], "category": "valid_single"},
         ]
 
+    def _resolve_data_path(self, path: str) -> str | None:
+        """Resolve data file path for different deployment scenarios."""
+        # 1. Try relative to current working directory (Docker with volume mount at /home/agent/data)
+        if Path(path).exists():
+            return path
+
+        # 2. Try relative to agent.py location parent (local development from green-agent/src)
+        agent_parent = Path(__file__).parent.parent / path
+        if agent_parent.exists():
+            return str(agent_parent)
+
+        # 3. Try relative to project root (local development from root)
+        project_root = Path(__file__).parent.parent.parent / path
+        if project_root.exists():
+            return str(project_root)
+
+        # 4. Try absolute path if provided
+        abs_path = Path(path)
+        if abs_path.is_absolute() and abs_path.exists():
+            return str(abs_path)
+
+        return None
+
     def _load_from_file(
-        self, 
-        path: str, 
-        task_ids: list[int] | None, 
-        reduced_tests: bool = False, 
+        self,
+        path: str,
+        task_ids: list[int] | None,
+        reduced_tests: bool = False,
         max_tasks: int | None = None
     ) -> list[dict]:
         """Load tasks from JSONL file with optional sampling for reduced tests."""
@@ -151,6 +181,15 @@ class Agent:
                 if line.strip():
                     task = json.loads(line)
                     task["task_id"] = task.get("task_id", task.get("id", f"task_{i}"))
+
+                    # Parse HomeBench output format to expected_operations
+                    if "expected_operations" not in task and "output" in task:
+                        task["expected_operations"] = HomeBenchMetricsCalculator.parse_homebench_output(task["output"])
+
+                    # Set category from type if not present
+                    if "category" not in task and "type" in task:
+                        task["category"] = task["type"]
+
                     all_tasks.append(task)
         
         # If no reduction needed, return all tasks
@@ -196,14 +235,19 @@ class Agent:
         """Load home status/method data and cache by home_id."""
         if self._home_data_cache is not None:
             return self._home_data_cache
-        
+
         path = config.get("home_data_path", "data/home_status_method_all.jsonl")
         homes: dict[int, dict] = {}
-        
-        if not Path(path).exists():
+
+        # Use same path resolution logic as task loading
+        resolved_path = self._resolve_data_path(path)
+
+        if not resolved_path or not Path(resolved_path).exists():
             logger.warning(f"Home data file not found: {path}")
             self._home_data_cache = homes
             return homes
+
+        path = resolved_path
         
         with open(path) as f:
             for line in f:

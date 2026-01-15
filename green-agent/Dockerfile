@@ -4,8 +4,12 @@ RUN adduser agent
 USER agent
 WORKDIR /home/agent
 
-COPY pyproject.toml uv.lock README.md ./
-COPY src src
+# Copy green-agent application files
+COPY green-agent/pyproject.toml green-agent/uv.lock green-agent/README.md ./
+COPY green-agent/src src
+
+# Copy data from parent directory
+COPY data data
 
 RUN \
     --mount=type=cache,target=/home/agent/.cache/uv,uid=1000 \

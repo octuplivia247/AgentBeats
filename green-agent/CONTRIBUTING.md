@@ -11,7 +11,7 @@ This guide is for team members taking over development while the primary maintai
 | Install deps | `uv sync` |
 | Start locally | `uv run src/server.py` |
 | Run tests | `uv run pytest -v --agent-url http://localhost:9009` |
-| Build Docker | `docker buildx build -t homebench-green-agent .` |
+| Build Docker | `cd .. && docker buildx build -f green-agent/Dockerfile -t homebench-green-agent .` |
 | Run Docker | `docker run -p 9009:9009 -p 9006:9006 homebench-green-agent --host 0.0.0.0 --port 9009 --mcp-host 0.0.0.0 --mcp-port 9006` |
 
 ---
@@ -118,8 +118,9 @@ uv run pytest -v --agent-url http://localhost:9009
 ### Test Against Docker
 
 ```bash
-# Build
-docker buildx build -t homebench-green-agent .
+# Build from parent directory (includes data/)
+cd ..  # Go to AgentBeats/
+docker buildx build -f green-agent/Dockerfile -t homebench-green-agent .
 
 # Run
 docker run -d -p 9009:9009 -p 9006:9006 --name test-agent homebench-green-agent \
@@ -129,6 +130,7 @@ docker run -d -p 9009:9009 -p 9006:9006 --name test-agent homebench-green-agent 
 sleep 5
 
 # Test
+cd green-agent
 uv run pytest -v --agent-url http://localhost:9009
 
 # Cleanup
@@ -340,7 +342,7 @@ Before pushing:
 - [ ] `uv sync` works
 - [ ] `uv run src/server.py` starts without errors
 - [ ] `uv run pytest -v --agent-url http://localhost:9009` passes
-- [ ] Docker build works: `docker buildx build -t test .`
+- [ ] Docker build works: `cd .. && docker buildx build -f green-agent/Dockerfile -t test .`
 - [ ] Docker run works: `docker run -p 9009:9009 -p 9006:9006 test --host 0.0.0.0 --port 9009 --mcp-host 0.0.0.0 --mcp-port 9006`
 
 ---
