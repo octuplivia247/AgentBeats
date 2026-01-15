@@ -3,8 +3,9 @@
 import json
 import logging
 import os
+import random
 import re
-from collections import Counter
+from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
@@ -69,6 +70,7 @@ class Agent:
         self.messenger = Messenger()
         self.mcp = MCPClient(MCP_SERVER_URL)
         self._mcp_ok: bool | None = None
+        self._home_data_cache: dict[int, dict] | None = None
 
     async def _mcp_available(self) -> bool:
         if self._mcp_ok is None:
@@ -121,8 +123,11 @@ class Agent:
 
     def _load_tasks(self, config: dict[str, Any]) -> list[dict]:
         path = config.get("dataset_path", "data/test_data.jsonl")
+        reduced_tests = config.get("reduced_tests", False)
+        max_tasks = config.get("max_tasks", 50 if reduced_tests else None)
+        
         if Path(path).exists():
-            return self._load_from_file(path, config.get("task_ids"))
+            return self._load_from_file(path, config.get("task_ids"), reduced_tests, max_tasks)
         if "tasks" in config:
             return config["tasks"]
         return [
@@ -130,25 +135,160 @@ class Agent:
             {"task_id": "demo_2", "instruction": "Set the bedroom thermostat to 72 degrees", "expected_operations": ["bedroom.thermostat.set_temperature(72)"], "category": "valid_single"},
         ]
 
-    def _load_from_file(self, path: str, task_ids: list[int] | None) -> list[dict]:
-        tasks = []
+    def _load_from_file(
+        self, 
+        path: str, 
+        task_ids: list[int] | None, 
+        reduced_tests: bool = False, 
+        max_tasks: int | None = None
+    ) -> list[dict]:
+        """Load tasks from JSONL file with optional sampling for reduced tests."""
+        all_tasks = []
         with open(path) as f:
             for i, line in enumerate(f):
                 if task_ids and i not in task_ids:
                     continue
                 if line.strip():
                     task = json.loads(line)
-                    task["task_id"] = task.get("task_id", f"task_{i}")
-                    tasks.append(task)
-        return tasks
+                    task["task_id"] = task.get("task_id", task.get("id", f"task_{i}"))
+                    all_tasks.append(task)
+        
+        # If no reduction needed, return all tasks
+        if not reduced_tests and max_tasks is None:
+            return all_tasks
+        
+        # Sample tasks stratified by category/type
+        if reduced_tests or max_tasks:
+            return self._sample_tasks_by_category(all_tasks, max_tasks or 50)
+        
+        return all_tasks
+
+    def _sample_tasks_by_category(self, tasks: list[dict], max_tasks: int) -> list[dict]:
+        """Sample tasks evenly across categories for representative testing."""
+        by_category: dict[str, list[dict]] = defaultdict(list)
+        for task in tasks:
+            category = task.get("type", task.get("category", "unknown"))
+            by_category[category].append(task)
+        
+        # Calculate tasks per category
+        num_categories = len(by_category)
+        if num_categories == 0:
+            return tasks[:max_tasks]
+        
+        tasks_per_cat = max(1, max_tasks // num_categories)
+        sampled = []
+        
+        for category, cat_tasks in by_category.items():
+            sample_size = min(tasks_per_cat, len(cat_tasks))
+            sampled.extend(random.sample(cat_tasks, sample_size))
+        
+        # If we have room for more, add random samples from remaining
+        remaining = max_tasks - len(sampled)
+        if remaining > 0:
+            used_ids = {t.get("task_id") or t.get("id") for t in sampled}
+            available = [t for t in tasks if (t.get("task_id") or t.get("id")) not in used_ids]
+            if available:
+                sampled.extend(random.sample(available, min(remaining, len(available))))
+        
+        return sampled[:max_tasks]
+
+    def _load_home_data(self, config: dict[str, Any]) -> dict[int, dict]:
+        """Load home status/method data and cache by home_id."""
+        if self._home_data_cache is not None:
+            return self._home_data_cache
+        
+        path = config.get("home_data_path", "data/home_status_method_all.jsonl")
+        homes: dict[int, dict] = {}
+        
+        if not Path(path).exists():
+            logger.warning(f"Home data file not found: {path}")
+            self._home_data_cache = homes
+            return homes
+        
+        with open(path) as f:
+            for line in f:
+                if line.strip():
+                    data = json.loads(line)
+                    home_id = data.get("home_id")
+                    if home_id is not None:
+                        homes[home_id] = data
+        
+        logger.info(f"Loaded home data for {len(homes)} homes")
+        self._home_data_cache = homes
+        return homes
+
+    def _get_home_for_task(self, task: dict, config: dict[str, Any]) -> dict | None:
+        """Get home data for a specific task based on home_id."""
+        home_id = task.get("home_id")
+        if home_id is None:
+            return None
+        
+        homes = self._load_home_data(config)
+        return homes.get(home_id)
+
+    def _format_home_context(self, home_data: dict) -> str:
+        """Format home data into a context string for the prompt."""
+        methods = home_data.get("method", [])
+        home_status = home_data.get("home_status", {})
+        
+        if not methods:
+            return ""
+        
+        # Group methods by room and device
+        room_devices: dict[str, dict[str, list[str]]] = defaultdict(lambda: defaultdict(list))
+        for method in methods:
+            room = method.get("room_name", "unknown")
+            device = method.get("device_name", "unknown")
+            operation = method.get("operation", "")
+            params = method.get("parameters", [])
+            
+            # Format operation with parameter info
+            if params:
+                param_str = ", ".join(p.get("name", "") for p in params)
+                op_formatted = f"{operation}({param_str})"
+            else:
+                op_formatted = f"{operation}()"
+            
+            room_devices[room][device].append(op_formatted)
+        
+        # Build context string
+        lines = ["Available devices and operations in this home:"]
+        for room, devices in sorted(room_devices.items()):
+            lines.append(f"\n{room}:")
+            for device, operations in sorted(devices.items()):
+                ops_str = ", ".join(operations)
+                lines.append(f"  - {device}: {ops_str}")
+            
+            # Add current state info if available
+            if room in home_status:
+                room_state = home_status[room]
+                state_items = []
+                for device in devices:
+                    if device in room_state and isinstance(room_state[device], dict):
+                        device_state = room_state[device]
+                        state = device_state.get("state", "unknown")
+                        attrs = device_state.get("attributes", {})
+                        attr_vals = []
+                        for attr_name, attr_data in attrs.items():
+                            if isinstance(attr_data, dict) and "value" in attr_data:
+                                attr_vals.append(f"{attr_name.strip()}={attr_data['value']}")
+                        if attr_vals:
+                            state_items.append(f"{device}: {state} ({', '.join(attr_vals)})")
+                        else:
+                            state_items.append(f"{device}: {state}")
+                if state_items:
+                    lines.append(f"    Current state: {'; '.join(state_items)}")
+        
+        return "\n".join(lines)
 
     async def _evaluate_task(self, task: dict, purple_url: str, config: dict) -> TaskResult:
         task_id = task.get("task_id", "unknown")
         expected = task.get("expected_operations", [])
-        category = task.get("category", "unknown")
+        category = task.get("category", task.get("type", "unknown"))
         
         try:
-            msg = self._format_message(task)
+            home_data = self._get_home_for_task(task, config)
+            msg = self._format_message(task, home_data)
             response = await self.messenger.talk_to_agent(msg, purple_url, new_conversation=True, timeout=config.get("timeout_seconds", 60))
             logger.info(f"Response for {task_id}: {response[:200]}...")
             
@@ -160,13 +300,33 @@ class Agent:
             logger.error(f"Error on {task_id}: {e}")
             return TaskResult(task_id=task_id, success=False, score=0.0, predicted_operations=[], expected_operations=expected, error=str(e), category=category)
 
-    def _format_message(self, task: dict) -> str:
-        return f"""You are a smart home assistant. Execute the following instruction:
-Instruction: {task.get("instruction", "")}
-Task ID: {task.get("task_id", "")}
-Home ID: {task.get("home_id", 0)}
+    def _format_message(self, task: dict, home_data: dict | None = None) -> str:
+        """Format the task message with optional home context."""
+        instruction = task.get("instruction", task.get("input", ""))
+        task_id = task.get("task_id", task.get("id", ""))
+        home_id = task.get("home_id", 0)
+        
+        # Build home context section
+        context_section = ""
+        if home_data:
+            context_section = f"""
+{self._format_home_context(home_data)}
+
+"""
+        
+        return f"""You are a smart home assistant. Execute the following instruction by generating the appropriate device operations.
+{context_section}Instruction: {instruction}
+Task ID: {task_id}
+Home ID: {home_id}
+
+IMPORTANT:
+- Only use devices and operations that are available in this home (listed above).
+- If a requested device or operation does not exist, respond with "error_input" for that part.
+- Use the exact format: room_name.device_name.operation(parameters)
+
 Respond ONLY with a JSON list of operations, no other text. Example format:
 ["living_room.light.turn_on()", "bedroom.thermostat.set_temperature(72)"]
+For invalid requests, include "error_input" in the list.
 """
 
     async def _parse_ops(self, response: str) -> list[str]:
