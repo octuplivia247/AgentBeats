@@ -2,9 +2,17 @@
 
 An evaluator agent for the [HomeBench](https://github.com/octuplivia247/AgentBeats) smart home benchmark. 
 
-The benchmark tests agents on their ability to translate natural language instructions into correct device API calls while also identifying and rejecting invalid or impossible requests. Unlike prior work focusing on straightforward single-device commands, HomeBench includes four challenging categories: valid single-device instructions, valid multi-device instructions, invalid single-device instructions, and invalid multi-device instructions.
+## Overview of the BenchPress Benchmark
+This Green Agent implements an evaluation framework for the HomeBench dataset, originally introduced by Li et al. (2025). HomeBench is designed to evaluate LLMs on smart home control tasks that include both valid and invalid instructions across single and multiple devices. Our implementation adapts this benchmark to the A2A protocol, allowing automated evaluation of "purple agents" (smart home assistants under test).
 
-The Green Agent orchestrates evaluation of Purple Agents (smart home assistants under test) by distributing tasks from the HomeBench dataset, collecting responses via the A2A protocol, parsing device operations, and computing detailed metrics including Exact Match, Precision, Recall, and F1 scores. 
+## HomeBench Dataset
+The original HomeBench benchmark (arXiv:2505.19628) evaluates LLMs on five main task categories:
+
+Valid Single (VS): Valid instructions for single device operation
+Valid Multiple (VM): Valid instructions requiring multiple device operations
+Invalid Single (IS): Invalid or ambiguous instructions for single devices that should be rejected
+Invalid Multiple (IM): Invalid instructions involving multiple devices
+Mix Multiple (MM): Mixed scenarios combining valid and invalid operations
 
 ## Table of Contents
 
